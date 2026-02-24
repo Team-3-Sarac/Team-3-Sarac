@@ -1,5 +1,5 @@
 from youtube_transcript_api import YouTubeTranscriptApi
-import json 
+import json
 from fastapi import APIRouter
 
 VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
@@ -14,7 +14,7 @@ def get_multi_transcripts(video_ids, output_file = 'transcripts.json'):
             transcript = ytt_api.fetch(video_id)
             all_fetched_transcripts.append(transcript)
             print(f"Fetched transcript for video ID: {video_id}")
-        
+
         except Exception as e:
             print(f"Error fetching transcript for video ID: {video_id}. Error: {e}")
 
@@ -35,4 +35,4 @@ if __name__ == "__main__":
     get_multi_transcripts(VIDEO_IDS)
 
 
-def transcribe():
+# def transcribe():
