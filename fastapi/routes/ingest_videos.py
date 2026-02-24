@@ -164,5 +164,10 @@ if __name__ == "__main__":
     print(f"TOTAL VIDEOS COLLECTED: {len(all_videos)}")
    
  # Save results to JSON file
-    with open("filtered_videos.json", "w") as f:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)
+    file_path = os.path.join(script_dir, "data", "filtered_videos.json")
+
+    with open(file_path, "w") as f:
         json.dump(all_videos, f, indent=4)
+

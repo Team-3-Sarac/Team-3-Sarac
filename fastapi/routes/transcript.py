@@ -1,10 +1,15 @@
 from youtube_transcript_api import YouTubeTranscriptApi
 import json
+import os
 from fastapi import APIRouter
 
 VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
 
-def get_multi_transcripts(video_ids, output_file = 'transcripts.json'):
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+file_path = os.path.join(script_dir, "data", "transcripts.json")
+
+def get_multi_transcripts(video_ids, output_file = file_path):
     ytt_api = YouTubeTranscriptApi()
 
     all_fetched_transcripts = []
