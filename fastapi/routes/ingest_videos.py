@@ -6,6 +6,7 @@
 
 import os
 import json
+import re
 from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -24,14 +25,37 @@ youtube = build("youtube", "v3", developerKey=API_KEY)
 VIEW_THRESHOLD = 5000
 DAYS_BACK = 180
 MAX_PER_CHANNEL = 120
-
+KEYWORDS = [
+    "transfer", "trade", "rumor", "news", "update", "signing",
+    "highlight", "highlights", "goal", "vs", "match", "analysis", "recap",
+    "premier league", "la liga", "serie a", "bundesliga", "ligue 1",
+    "champions league", "ucl", "mls", "soccer"
+]
+EXCLUDE_KEYWORDS = [
+    "hockey", "nhl", "winter olympics", "winterolympics",
+    "basketball", "baseball", "touchdown", "homerun",
+    "slam dunk", "quarterback"
+]
 
 def get_uploads_playlist(channel_id):
     response = youtube.channels().list( part="contentDetails", id=channel_id).execute() 
     return response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
 
-def get_recent_videos(playlist_id):
+def is_relevant(snippet, keywords, exclude_keywords):
+    text = (snippet.get("title", "") + " " + snippet.get("description", "")).lower()
+    for ex in exclude_keywords:
+        if ex in text:
+            return False
+
+    if not keywords:
+        return True
+
+    return any(keyword in text for keyword in keywords)
+
+
+
+def get_recent_videos(playlist_id, keywords=None, exclude_keywords=None):
     cutoff_date = datetime.utcnow() - timedelta(days=DAYS_BACK)
     video_ids = []
     next_page_token = None
@@ -55,6 +79,11 @@ def get_recent_videos(playlist_id):
             #stop if older than 6 months
             if published_at < cutoff_date:
                 return video_ids
+
+            # Filter by keywords (case-insensitive)
+            if not is_relevant(item["snippet"], keywords, exclude_keywords):
+                continue
+
             #cap, prevents 2k+ from one channel 
             if len(video_ids) >= MAX_PER_CHANNEL:
                 return video_ids
@@ -66,15 +95,43 @@ def get_recent_videos(playlist_id):
     return video_ids
 
 
+def parse_duration(duration):
+    match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration)
+    if not match:
+        return 0
+    h, m, s = match.groups()
+    return int(h or 0) * 3600 + int(m or 0) * 60 + int(s or 0)
+
+
 def filter_by_views(video_ids):
     filtered = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
-        response = youtube.videos().list( part="statistics", id=",".join(batch) ).execute()
+        response = youtube.videos().list(
+            part="snippet,statistics,contentDetails",
+            id=",".join(batch)
+        ).execute()
         for item in response["items"]:
-            views = int(item["statistics"].get("viewCount", 0))
+            stats = item["statistics"]
+            views = int(stats.get("viewCount", 0))
             if views > VIEW_THRESHOLD:
-                filtered.append(item["id"])
+                snippet = item["snippet"]
+                filtered.append({
+                    "video_id": item["id"],
+                    "title": snippet["title"],
+                    "thumbnail_url": snippet["thumbnails"].get("high", {}).get("url"),
+                    "channel_id": snippet["channelId"],
+                    "channel_name": snippet["channelTitle"],
+                    "publish_date": snippet["publishedAt"],
+                    "league": None,
+                    "teams": None,
+                    "view_count": views,
+                    "like_count": int(stats.get("likeCount", 0)),
+                    "comment_count": int(stats.get("commentCount", 0)),
+                    "duration_seconds": parse_duration(item["contentDetails"]["duration"]),
+                    "summary": None,
+                    "created_at": datetime.utcnow().isoformat() + "Z"
+                })
     return filtered
 
 if __name__ == "__main__":
@@ -95,7 +152,7 @@ if __name__ == "__main__":
 
         playlist_id = get_uploads_playlist(channel_id)
 
-        recent_videos = get_recent_videos(playlist_id)
+        recent_videos = get_recent_videos(playlist_id, KEYWORDS, EXCLUDE_KEYWORDS)
         print(f"Recent (<= 6 months): {len(recent_videos)}")
 
         filtered_videos = filter_by_views(recent_videos)
@@ -107,5 +164,10 @@ if __name__ == "__main__":
     print(f"TOTAL VIDEOS COLLECTED: {len(all_videos)}")
    
  # Save results to JSON file
-    with open("filtered_videos.json", "w") as f:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)
+    file_path = os.path.join(parent_dir, "data", "filtered_videos.json")
+
+    with open(file_path, "w") as f:
         json.dump(all_videos, f, indent=4)
+
