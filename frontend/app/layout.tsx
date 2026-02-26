@@ -4,6 +4,8 @@ import "@/styles/layout.css";
 import "@/styles/components.css";
 import "@/styles/home.css";
 import "@/styles/dashboard.css";
+import "@/styles/channels.css";
+import "@/styles/trends.css";
 import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 
