@@ -1,4 +1,4 @@
-# ingestion plus filtering pipline 
+# ingestion plus filtering pipline
 # for each. ytube channel it gets :
 # uploads playlist ,pulls recent videos ( last 6 months )
 # limit to 120 videos max
@@ -80,7 +80,7 @@ def get_recent_videos(playlist_id, keywords=None, exclude_keywords=None):
             if published_at < cutoff_date:
                 return video_ids
 
-            # Filter by keywords (case-insensitive)
+            # Filter by keywords (case-insensitive), done here to save API quota
             if not is_relevant(item["snippet"], keywords, exclude_keywords):
                 continue
 
@@ -134,8 +134,38 @@ def filter_by_views(video_ids):
                 })
     return filtered
 
+"""
+Iterates through a list of channels to retrieve and filter relevant videos.
+
+For each channel, it gets the uploads playlist, retrieves relevant video IDs
+from the last 6 months (filtered by keywords), and keeps videos with > 5000 views.
+
+Returns:
+    list: A list of dictionaries containing video IDs and relevant metadata.
+"""
+def ingest_from_channels(channel_ids, keywords, exclude_keywords):
+    all_videos = []
+
+    for channel_id in channel_ids:
+        try:
+            print(f"Processing channel: {channel_id}")
+            playlist_id = get_uploads_playlist(channel_id)
+            recent_videos = get_recent_videos(playlist_id, keywords, exclude_keywords)
+            print(f"Recent (<= 6 months): {len(recent_videos)}")
+            filtered_videos = filter_by_views(recent_videos)
+            print(f"Passed view filter (>5000): {len(filtered_videos)}")
+
+            all_videos.extend(filtered_videos)
+
+        except Exception as e:
+            print(f"Error processing channel {channel_id}: {e}")
+
+    print("\n=================================")
+    print(f"TOTAL VIDEOS COLLECTED: {len(all_videos)}")
+    return all_videos
+
 if __name__ == "__main__":
-   
+
     channel_ids = [
         "UCET00YnetHT7tOpu12v8jxg",
         "UCqZQlzSHbVJrwrn5XvzrzcA",
@@ -144,30 +174,31 @@ if __name__ == "__main__":
         "UC6UL29enLNe4mqwTfAyeNuw"
     ]
 
-    all_videos = []
+    all_videos = ingest_from_channels(channel_ids, KEYWORDS, EXCLUDE_KEYWORDS)
 
-    for channel_id in channel_ids:
-        print("\n=================================")
-        print(f"Processing channel: {channel_id}")
+    # all_videos = []
 
-        playlist_id = get_uploads_playlist(channel_id)
+    # for channel_id in channel_ids:
+    #     print("\n=================================")
+    #     print(f"Processing channel: {channel_id}")
 
-        recent_videos = get_recent_videos(playlist_id, KEYWORDS, EXCLUDE_KEYWORDS)
-        print(f"Recent (<= 6 months): {len(recent_videos)}")
+    #     playlist_id = get_uploads_playlist(channel_id)
 
-        filtered_videos = filter_by_views(recent_videos)
-        print(f"Passed view filter (>5000): {len(filtered_videos)}")
+    #     recent_videos = get_recent_videos(playlist_id, KEYWORDS, EXCLUDE_KEYWORDS)
+    #     print(f"Recent (<= 6 months): {len(recent_videos)}")
 
-        all_videos.extend(filtered_videos)
+    #     filtered_videos = filter_by_views(recent_videos)
+    #     print(f"Passed view filter (>5000): {len(filtered_videos)}")
 
-    print("\n=================================")
-    print(f"TOTAL VIDEOS COLLECTED: {len(all_videos)}")
-   
- # Save results to JSON file
+    #     all_videos.extend(filtered_videos)
+
+    # print("\n=================================")
+    # print(f"TOTAL VIDEOS COLLECTED: {len(all_videos)}")
+
+# Save results to JSON file
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
     file_path = os.path.join(parent_dir, "data", "filtered_videos.json")
 
     with open(file_path, "w") as f:
         json.dump(all_videos, f, indent=4)
-
