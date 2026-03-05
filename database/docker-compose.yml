@@ -14,7 +14,7 @@ services:
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet 'mongodb://root:examplepassword@localhost:27017/admin' --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
+      test: ["CMD-SHELL", "mongosh --quiet 'mongodb://root:example@localhost:27017/admin' --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
       interval: 10s
       timeout: 5s
       retries: 10
