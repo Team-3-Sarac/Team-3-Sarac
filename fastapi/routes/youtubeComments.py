@@ -7,8 +7,14 @@ from fastapi import APIRouter
 
 load_dotenv()
 
-VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
-DEVELOPER_KEY = os.getenv("GOOGLE_API_KEY")
+#VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
+#DEVELOPER_KEY = os.getenv("GOOGLE_API_KEY")
+
+#updated the video ids and the new env var key to fetch real comments 
+# for the real video ids 
+VIDEO_IDS = ["OD2_jIYmlXg", "zVkRmB1f4YY", "O5d4t0v3G0I", "9smHv7Tun4g", "OnWV7UT1C3g"]
+DEVELOPER_KEY = os.getenv("YOUTUBE_API_KEY")
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 file_path = os.path.join(parent_dir, "data", "youtubeComments.json")

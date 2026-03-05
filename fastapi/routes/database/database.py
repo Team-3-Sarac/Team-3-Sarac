@@ -10,7 +10,11 @@ mongo_root = os.getenv("MONGO_ROOT_USERNAME")
 mongo_root_pass = os.getenv("MONGO_ROOT_PASSWORD")
 mongo_name = os.getenv("MONGO_DATABASE")
 
-client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@localhost:27017/admin")
+# this tried to log into mongo with no users so it rejects the login 
+# client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@localhost:27017/admin")
+# fixed it with no authentication 
+client = MongoClient("mongodb://localhost:27017/")
+
 db = client[mongo_name]
 
 
