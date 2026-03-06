@@ -3,8 +3,6 @@ import json
 import os
 from fastapi import APIRouter
 
-#VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
-VIDEO_IDS = ["OD2_jIYmlXg", "zVkRmB1f4YY", "O5d4t0v3G0I", "9smHv7Tun4g", "OnWV7UT1C3g"]
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 file_path = os.path.join(parent_dir, "data", "transcripts.json")
@@ -37,7 +35,9 @@ def get_multi_transcripts(video_ids, output_file = file_path):
         json.dump(processed_data, f, indent=2, ensure_ascii=False)
 
 if __name__ == "__main__":
-    get_multi_transcripts(VIDEO_IDS)
-
-
+    filtered_path = os.path.join(parent_dir, "data", "filtered_videos.json")
+    with open(filtered_path, "r") as f:
+        filtered_videos = json.load(f)
+        video_ids = [v["video_id"] for v in filtered_videos]
+    get_multi_transcripts(video_ids)
 # def transcribe():
