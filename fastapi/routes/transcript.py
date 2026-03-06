@@ -10,6 +10,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 file_path = os.path.join(parent_dir, "data", "transcripts.json")
 
+# need to update in order to avoid ip ban
 def get_multi_transcripts(video_ids, output_file = file_path, delay = 3):
     ytt_api = YouTubeTranscriptApi()
 
