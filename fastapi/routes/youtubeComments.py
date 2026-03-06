@@ -29,8 +29,8 @@ def get_comments(video_Ids, output_file = file_path, delay = 2):
     youtube = build('youtube', 'v3', developerKey = DEVELOPER_KEY)
     all_comments = []
     for index, video_Id in enumerate(video_Ids):
-        if index > 0:
-            time.sleep(delay)
+        # if index > 0:
+        #     time.sleep(delay)
 
         try:
             print(f"[{index + 1}/{len(video_Ids)}]Fetching comments for: {video_Id}")
