@@ -8,12 +8,8 @@ from fastapi import APIRouter
 
 load_dotenv()
 
-#VIDEO_IDS = ["VmxC8ehX-yk", "2jHLPPy_9wY"]
 #DEVELOPER_KEY = os.getenv("GOOGLE_API_KEY")
 
-#updated the video ids and the new env var key to fetch real comments
-# for the real video ids
-VIDEO_IDS = ["OD2_jIYmlXg", "zVkRmB1f4YY", "O5d4t0v3G0I", "9smHv7Tun4g", "OnWV7UT1C3g"]
 DEVELOPER_KEY = os.getenv("YOUTUBE_API_KEY")
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -64,4 +60,8 @@ def get_comments(video_Ids, output_file = file_path, delay = 2):
 
 
 if __name__ == "__main__":
-    get_comments(VIDEO_IDS)
+    filtered_path = os.path.join(parent_dir, "data", "filtered_videos.json")
+    with open(filtered_path, "r") as f:
+        filtered_videos = json.load(f)
+    video_ids = [v["video_id"] for v in filtered_videos]
+    get_comments(video_ids)

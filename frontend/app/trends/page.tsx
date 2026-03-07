@@ -5,6 +5,7 @@ import LegendDot from "../components/legendDot";
 import BarChartMock from "../components/barChartMock";
 import LineChartMock from "../components/lineChartMock";
 import TopicRow from "../components/topicRow";
+import Claims from "../components/claims";
 
 
 
@@ -49,6 +50,11 @@ export default function TrendsPage() {
               </div>
             </div>
           </Card>
+        </div>
+        
+        {/* Claims */}
+        <div className="mt-6">
+          <Claims />
         </div>
 
         {/* Table */}
