@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function LandingPage() {
   return (
     <div className="bg-black text-white min-h-screen">
@@ -23,13 +25,19 @@ export default function LandingPage() {
         </p>
 
         <div className="flex justify-center gap-4 mt-8">
-          <button className="bg-white text-black px-6 py-3 rounded-md font-medium hover:bg-neutral-200 transition">
-            Go to Dashboard →
-          </button>
+        <Link
+          href="/dashboard"
+          className="bg-white text-black px-6 py-3 rounded-md font-medium hover:bg-neutral-200 transition"
+        >
+          Go to Dashboard →
+        </Link>
 
-          <button className="border border-neutral-700 px-6 py-3 rounded-md hover:bg-neutral-900 transition">
-            Learn more
-          </button>
+        <Link
+          href="/trends"
+          className="border border-neutral-700 px-6 py-3 rounded-md hover:bg-neutral-900 transition"
+        >
+          Learn more
+        </Link>
         </div>
 
       </section>
@@ -131,9 +139,12 @@ export default function LandingPage() {
           trending match content, and AI-generated intelligence.
         </p>
 
-        <button className="mt-8 bg-white text-black px-6 py-3 rounded-md font-medium hover:bg-neutral-200 transition">
+        <Link
+          href="/dashboard"
+          className="mt-8 inline-block bg-white text-black px-6 py-3 rounded-md font-medium hover:bg-neutral-200 transition"
+        >
           Open Dashboard →
-        </button>
+        </Link>
 
       </section>
 
