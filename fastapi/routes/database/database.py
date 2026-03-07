@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"        # Bella: added one more .parent lvl
 load_dotenv(dotenv_path=env_path)
 
 mongo_root = os.getenv("MONGO_ROOT_USERNAME")

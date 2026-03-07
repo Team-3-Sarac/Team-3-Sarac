@@ -15,10 +15,10 @@ Both scorers will be benchmarked against the same dataset. Findings will serve a
 
 **File Ownership**
 
-| Approach                   | Owner    | File                  |
-|----------------------------|----------|-----------------------|
-| Weighted Scoring Algorithm | Isabella | `trend_scoring.py`    |
-| LLM-Based Scoring          | Rudy     | `llm_trend_scorer.py` |
+| Approach                   | Owner    | File                        |
+|----------------------------|----------|-----------------------------|
+| Weighted Scoring Algorithm | Isabella | `trend_scoring_weighted.py` |
+| LLM-Based Scoring          | Rudy     | `llm_trend_scorer.py`       |
 
 ---
 
@@ -31,7 +31,7 @@ Both scorers will be benchmarked against the same dataset. Findings will serve a
 
 | Component          | Source Fields                               | Description                                                                                                                         |
 |--------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views, normalized against 10% ceiling                                                                          |
+| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views, normalized against 10% ceiling (can be calibrated down to ~5% depending on data)                        |
 | `recency_score`    | `publish_date`                              | Linear decay over 30 days (1.0 today → 0.0 at 30 days)                                                                              |
 | `comment_quality`  | `comments.like_count`                       | Avg comment like count, normalized against ceiling of 100. Proxy for narrative popularity until `trends.mention_count` is populated |
 | `views_normalized` | `view_count`                                | Min-max normalized across dataset                                                                                                   |
