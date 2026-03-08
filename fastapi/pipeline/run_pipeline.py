@@ -52,13 +52,13 @@ def run_pipeline(channel_ids=CHANNEL_IDS):
     print(f"Processing {len(video_ids)} videos...")
 
     get_comments(video_ids)
-    #get_multi_transcripts(video_ids) comment out for for ip ban issue
+    get_multi_transcripts(video_ids)
 
     print("\n--- Phase 3: Loading Transcript and Comment Data into MongoDB ---")
 
     files_to_ingest = [
         ("youtubeComments.json", f"{API_BASE_URL}/comments"),
-        #("transcripts.json", f"{API_BASE_URL}/transcripts") comment out for for ip ban issue
+        ("transcripts.json", f"{API_BASE_URL}/transcripts")
     ]
 
     for file_name, endpoint in files_to_ingest:
