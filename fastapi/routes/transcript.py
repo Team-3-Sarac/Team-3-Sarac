@@ -2,21 +2,44 @@ from youtube_transcript_api import YouTubeTranscriptApi
 import json
 import os
 from fastapi import APIRouter
+import random
 import time
+from requests import Session
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 file_path = os.path.join(parent_dir, "data", "transcripts.json")
 
-# need to update in order to avoid ip ban
-def get_multi_transcripts(video_ids, output_file = file_path, delay = 3):
-    ytt_api = YouTubeTranscriptApi()
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
+
+def create_session():
+    session = Session()
+    session.headers.update({
+        "User-Agent": random.choice(USER_AGENTS)
+    })
+    return session
+
+
+# Rotates user agent every 15 videos, current implementation avoids ip ban
+def get_multi_transcripts(video_ids, output_file = file_path, delay = 0):
 
     processed_data = []
+    ytt_api = YouTubeTranscriptApi(http_client=create_session())
 
     for index, video_id in enumerate(video_ids):
-        if index > 0:
-            time.sleep(delay)
+        if index > 0 and index % 15 == 0:
+            ytt_api = YouTubeTranscriptApi(http_client=create_session())
+            if delay > 0:
+                wait_time = random.uniform(delay - (delay/2), delay)
+                print(f"Waiting for {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+
         try:
             print(f"[{index + 1}/{len(video_ids)}]Fetching transcript for: {video_id}")
             transcript = ytt_api.fetch(video_id)
