@@ -1,122 +1,232 @@
 # Trend Evaluation & Insight Validation
 **Sprint:** Week 5–6  
-**Status:** In Progress — Scoring formula created + outline of this document
+**Status:** In Progress — Two approaches defined and analysis pending (week 6)  
+**Sources:** https://www.geeksforgeeks.org/data-science/spearmans-rank-correlation/
 
 ---
 
 ## 1. Purpose
 
-This document will validate the outputs of the trend scoring algorithm developed by the DS team during sprint weeks 5 and 6. 
-It will serve as the reference for understanding how trend scores are computed, what the current outputs mean, and what adjustments are needed before 
-backend integration and frontend UI display. Findings will be communicated to the backend and frontend teams via this document and corresponding communication.
+This document validates the outputs of the trend scoring pipeline developed during Sprint 5–6. It covers two approaches:
+- A weighted algorithmic scorer
+- A LLM-based scorer  
+
+Both scorers will be benchmarked against the same dataset. Findings will serve as the cross-team reference before backend integration and frontend display.
+
+**File Ownership**
+
+| Approach                   | Owner    | File                        |
+|----------------------------|----------|-----------------------------|
+| Weighted Scoring Algorithm | Isabella | `trend_scoring_weighted.py` |
+| LLM-Based Scoring          | Rudy     | `llm_trend_scorer.py`       |
 
 ---
 
-## 2. Trend Scoring Formula
 
-The algorithm produces a composite trend score per video in the range of 0.0 to 1.0. The formula for `trend_score` is the following:
+## 2. Approach 1: Weighted Scoring Algorithm
 
+### Formula
 
-`trend_score = (engagement_rate  × 0.35) + (recency_score    × 0.30) + (comment_quality  × 0.20) + (views_normalized × 0.15)`
+`trend_score = (engagement_rate × 0.35) + (recency_score × 0.30) + (comment_quality × 0.20) + (views_normalized × 0.15)`
 
+| Component          | Source Fields                               | Description                                                                                                                         |
+|--------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views, normalized against 10% ceiling (can be calibrated down to ~5% depending on data)                        |
+| `recency_score`    | `publish_date`                              | Linear decay over 30 days (1.0 today → 0.0 at 30 days)                                                                              |
+| `comment_quality`  | `comments.like_count`                       | Avg comment like count, normalized against ceiling of 100. Proxy for narrative popularity until `trends.mention_count` is populated |
+| `views_normalized` | `view_count`                                | Min-max normalized across dataset                                                                                                   |
 
-| Component          | Source Fields                               | Description                                                                                                                                                 |
-|--------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views                                                                                                                                  |
-| `recency_score`    | `publish_date`                              | Natural, linear decay over 30 days (1.0 if published today, 0.0 at 30 days old)                                                                             |
-| `comment_quality`  | `comments.like_count`                       | Average like count / comment, normalized against a ceiling of ~100. Using for "narrative popularity" until `trends.mention_count` is populated via pipeline |
-| `views_normalized` | `view_count`                                | Min-max normalized view count relative to all videos in the dataset                                                                                         |
+**Trending threshold:** `score >= 0.55` can be changed once full dataset is loaded.
 
-### Trending Threshold
-Initially, a video is classified as `is_trending = true` when `trend_score >= 0.55`. However, this may change further into the evaluation.
-
-### Justification for Weight and Scoring
-- Engagement rate carries the highest weight (0.35) because a video with high likes and comments relative to views signals strong resonance regardless of total reach (i.e. views).
-- Recency (0.30) is weighted second because trending content is time-sensitive. 
-- Comment quality (0.20) serves as the current narrative popularity signal, replacing `trends.mention_count` until the LLM claims pipeline is fully operational (week 6). 
-- Views normalization (0.15) provides another popularity signal, but is kept lower than `comment_quality` as comments typically signify more user engagement than just raw views.
+**Weight justification:** 
+- The engagement rate (0.35) reflects audience quality over raw reach. 
+- The recency (0.30) reflects time-sensitivity of trending content. 
+- The comment quality (0.20) captures narrative resonance. 
+- The views normalization (0.15) adds relative popularity without letting high-view outliers dominate.
 
 ---
 
-## 3. Dataset Overview
+## 3. Approach 2: LLM-Based Scoring
+
+Instead of computing a score from raw metrics, the LLM receives a video's title, summary, and top comments and assesses trending potential based on semantic understanding, 
+match stakes, controversy, narrative momentum, and fan sentiment.
+
+**Input per video:**
+- `title`
+- `summary` (if available)
+- Top 5 comments by `like_count`
+- `league`, `publish_date`
+
+**Output per video:**
+- `llm_trend_score` (0.0–1.0)
+- `reasoning` (1 or 2 sentence justification)
+- `is_trending` (true/false, threshold TBD)
+
+---
+
+## 4. Benchmarking Plan (Fully executed during week 6)
+
+Both approaches run against the same dataset and compared on:
+
+| Metric                  | Description                                                                                                      |
+|-------------------------|------------------------------------------------------------------------------------------------------------------|
+| **Rank correlation**    | Spearman's rank correlation between algorithmic and LLM score rankings                                           |
+| **Edge case handling**  | Do both approaches correctly handle outliers (e.g. viral non-soccer clips, high-profile low-engagement matches)? |
+| **LLM consistency**     | LLM scorer run 3x on same input and then variance in scores measured                                             |
+| **Threshold agreement** | How often do both approaches agree on `is_trending` classification?                                              |
+
+**Pipeline for Evaluation:**
+```
+filtered_videos.json + youtubeComments.json
+        |
+        V
+trend_scoring.py       ->  algorithmic_scores.json
+llm_trend_scorer.py    ->  llm_scores.json
+        |
+        V
+benchmark.py           ->  benchmark_report.json
+```
+
+---
+
+## 5. Dataset Overview
 
 **Source files:**  
 **Channel:**  
 **Videos analyzed:**  
 **Comment records scored:**  
 **Date range:**  
-**Trending videos identified:**  
+**Trending videos identified (algorithmic):**  
+**Trending videos identified (LLM):**  
 
 ---
 
-## 4. Trend Output Analysis
+## 6. Trend Output Analysis
 
 ### Video 1: (Title)
-(Table of calculated scores)  
-(Written Analysis)  
+| Field              | Algorithmic | LLM |
+|--------------------|-------------|-----|
+| `trend_score`      |             |     |
+| `is_trending`      |             |     |
+| `engagement_rate`  |             | —   |
+| `recency_score`    |             | —   |
+| `comment_quality`  |             | —   |
+| `views_normalized` |             | —   |
+| `reasoning`        | —           |     |
+
+**Assessment:**
 
 ---
 
 ### Video 2: (Title)
-(Table of calculated scores)  
-(Written Analysis)  
+| Field              | Algorithmic | LLM |
+|--------------------|-------------|-----|
+| `trend_score`      |             |     |
+| `is_trending`      |             |     |
+| `engagement_rate`  |             | —   |
+| `recency_score`    |             | —   |
+| `comment_quality`  |             | —   |
+| `views_normalized` |             | —   |
+| `reasoning`        | —           |     |
+
+**Assessment:**
 
 ---
 
 ### Video 3: (Title)
-(Table of calculated scores)  
-(Written Analysis)  
+| Field              | Algorithmic | LLM |
+|--------------------|-------------|-----|
+| `trend_score`      |             |     |
+| `is_trending`      |             |     |
+| `engagement_rate`  |             | —   |
+| `recency_score`    |             | —   |
+| `comment_quality`  |             | —   |
+| `views_normalized` |             | —   |
+| `reasoning`        | —           |     |
+
+**Assessment:**
 
 ---
 
 ### Video 4: (Title)
-(Table of calculated scores)  
-(Written Analysis)  
+| Field              | Algorithmic | LLM |
+|--------------------|-------------|-----|
+| `trend_score`      |             |     |
+| `is_trending`      |             |     |
+| `engagement_rate`  |             | —   |
+| `recency_score`    |             | —   |
+| `comment_quality`  |             | —   |
+| `views_normalized` |             | —   |
+| `reasoning`        | —           |     |
+
+**Assessment:**
 
 ---
 
 ### Video 5: (Title)
-(Table of calculated scores)  
-(Written Analysis)  
+| Field              | Algorithmic | LLM |
+|--------------------|-------------|-----|
+| `trend_score`      |             |     |
+| `is_trending`      |             |     |
+| `engagement_rate`  |             | —   |
+| `recency_score`    |             | —   |
+| `comment_quality`  |             | —   |
+| `views_normalized` |             | —   |
+| `reasoning`        | —           |     |
+
+**Assessment:**
 
 ---
 
-## 5. Raw Data vs. Trend Score Comparison
-(Table of calculated scores)  
-(Written Analysis)  
+## 7. Raw Data vs. Trend Score Comparison
+
+| Title | Views | Likes | Comments | Eng. Rate | Algo Score | LLM Score | Agreement |
+|-------|-------|-------|----------|-----------|------------|-----------|-----------|
+|       |       |       |          |           |            |           |           |
+|       |       |       |          |           |            |           |           |
+|       |       |       |          |           |            |           |           |
+|       |       |       |          |           |            |           |           |
+|       |       |       |          |           |            |           |           |
+
+**Rank correlation (Spearman's):**  
+**Assessment:**
 
 ---
 
-## 6. LLM Layer Status
+## 8. LLM Claims Layer Status
 
-The claim extraction pipeline is currently under development by the DS team as a separate sprint task (LLM Integration Layer).
-Once operational, each videos transcript chunks and comments will be processed to extract claims, which will then be grouped into narratives.
-The `comment_quality` component in the current scoring formula will be replaced by `trends.mention_count` (the count of claims per narrative within a time window) 
-which is a more meaningful signal.
+Claim extraction pipeline is under development (LLM Integration Layer task). Once operational, `comment_quality` in the algorithmic scorer will be replaced by 
+`trends.mention_count` which is the claim frequency per narrative within a time window.
 
 ---
 
-## 7. Inconsistencies & Cross-Team Feedback
+## 9. Inconsistencies & Cross-Team Feedback
 
 | # | Finding                                                     | Severity | Team    | Action                             |
 |---|-------------------------------------------------------------|----------|---------|------------------------------------|
 | 1 | `league` and `teams` fields are `null` for all videos in DB | High     | Backend | Populate during ingestion pipeline |
+| 2 |                                                             |          |         |                                    |
+| 3 |                                                             |          |         |                                    |
 
 ---
 
-## 8. Recommendations
+## 10. Recommendations
 
-**Recommendation 1:**  
+**Recommendation 1:**
 
 ---
 
-## 9. Repo Files Referenced
+## 11. Repo Files Referenced
 
-| File                       | Description                                                   |
-|----------------------------|---------------------------------------------------------------|
-| `trend_scoring.py`         | Trend scoring algorithm (DS team)                             |
-| `filtered_videos.json`     | Source video metadata from ingestion pipeline                 |
-| `youtubeComments.json`     | Source comment data from ingestion pipeline                   |
-| `trend_scores_output.json` | Scored output from algorithm run used for this evaluation doc |
+| File                      | Description                        |
+|---------------------------|------------------------------------|
+| `trend_scoring.py`        | Weighted scoring algorithm (Bella) |
+| `llm_trend_scorer.py`     | LLM-based scoring (Rudy)           |
+| `benchmark.py`            | Benchmarking and comparison script |
+| `filtered_videos.json`    | Source video metadata              |
+| `youtubeComments.json`    | Source comment data                |
+| `algorithmic_scores.json` | Output from weighted scorer        |
+| `llm_scores.json`         | Output from LLM scorer             |
+| `benchmark_report.json`   | Final benchmark comparison output  |
 
 ---
