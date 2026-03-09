@@ -23,7 +23,7 @@ youtube = build("youtube", "v3", developerKey=API_KEY)
 
 #dataset and quality control 
 VIEW_THRESHOLD = 5000
-DAYS_BACK = 180
+DAYS_BACK = 7 # changed to 7 for weekly updates
 MAX_PER_CHANNEL = 120
 KEYWORDS = [
     "transfer", "trade", "rumor", "news", "update", "signing",
@@ -151,7 +151,7 @@ def ingest_from_channels(channel_ids, keywords, exclude_keywords):
             print(f"Processing channel: {channel_id}")
             playlist_id = get_uploads_playlist(channel_id)
             recent_videos = get_recent_videos(playlist_id, keywords, exclude_keywords)
-            print(f"Recent (<= 6 months): {len(recent_videos)}")
+            print(f"Recent (<= 7 days): {len(recent_videos)}")
             filtered_videos = filter_by_views(recent_videos)
             print(f"Passed view filter (>5000): {len(filtered_videos)}")
 

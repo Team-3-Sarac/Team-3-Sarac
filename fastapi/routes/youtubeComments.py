@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
@@ -16,11 +17,19 @@ parent_dir = os.path.dirname(script_dir)
 file_path = os.path.join(parent_dir, "data", "youtubeComments.json")
 
 # extracts 100 most relevant top level comments from given video
-def get_comments(video_Ids, output_file = file_path):
+def get_comments(video_Ids, output_file = file_path, delay = 2):
+    if not DEVELOPER_KEY:
+        print("Error: YOUTUBE_API_KEY not found in environment.")
+        return
+
     youtube = build('youtube', 'v3', developerKey = DEVELOPER_KEY)
     all_comments = []
-    for video_Id in video_Ids:
+    for index, video_Id in enumerate(video_Ids):
+        # if index > 0:
+        #     time.sleep(delay)
+
         try:
+            print(f"[{index + 1}/{len(video_Ids)}]Fetching comments for: {video_Id}")
             request = youtube.commentThreads().list(
                 part = 'snippet',
                 videoId = video_Id,
@@ -47,6 +56,7 @@ def get_comments(video_Ids, output_file = file_path):
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(all_comments, f, indent=4, ensure_ascii=False)
+        print(f"\nDone. Saved {len(all_comments)} total comments to {output_file}")
 
 
 if __name__ == "__main__":
