@@ -6,3 +6,4 @@ transcription/venv/
 __pycache__/
 *.pyc
 .venv/
+.idea/
