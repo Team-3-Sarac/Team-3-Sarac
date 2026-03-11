@@ -25,37 +25,73 @@ CHANNEL_IDS = [
         "UC6UL29enLNe4mqwTfAyeNuw"
     ]
 
+class StageTimer:
+    def __init__(self):
+        self.stages = {}
+        self.start_time = None
+
+    def start(self, stage_name):
+        self.stages[stage_name] = {'start': time.time(), 'end': None}
+        print(f"\n>>> Starting Stage: {stage_name}...")
+
+    def stop(self, stage_name):
+        if stage_name in self.stages:
+            self.stages[stage_name]['end'] = time.time()
+            duration = self.stages[stage_name]['end'] - self.stages[stage_name]['start']
+            print(f">>> Completed {stage_name} in {duration:.2f} seconds.")
+
+    def get_summary(self):
+        print("\n" + "="*40)
+        print("PIPELINE RUNTIME SUMMARY")
+        print("="*40)
+        total_dist = 0
+        for stage, times in self.stages.items():
+            if times['end']:
+                diff = times['end'] - times['start']
+                total_dist += diff
+                print(f"{stage:.<30} {diff:>7.2f}s")
+        print("-" * 40)
+        print(f"{'TOTAL RUNTIME':.<30} {total_dist:>7.2f}s")
+        print("="*40)
+
 def run_pipeline(channel_ids=CHANNEL_IDS):
-    print(f"[{datetime.now()}] Starting Weekly Ingestion Pipeline...")
+    timer = StageTimer()
+    overall_start = datetime.now()
+    print(f"[{overall_start}] Starting Weekly Ingestion Pipeline...")
 
-    print("\n--- Phase 1: Fetching Video Metadata ---")
-
-    video_metadata = ingest_from_channels(channel_ids, KEYWORDS, EXCLUDE_KEYWORDS)
-
-    if not video_metadata:
-        print("No new videos found. Exiting pipeline.")
-        return
-
-    video_ids = [v['video_id'] for v in video_metadata]
-
-    print("Pushing video metadata to MongoDB...")
+    # --- Phase 1: Video Metadata ---
+    timer.start("Phase 1: Video Metadata Fetching")
     try:
+        video_metadata = ingest_from_channels(channel_ids, KEYWORDS, EXCLUDE_KEYWORDS)
+        if not video_metadata:
+            print("No new videos found. Exiting pipeline.")
+            timer.stop("Phase 1: Metadata Fetching")
+            return
+
+        video_ids = [v['video_id'] for v in video_metadata]
+
+        # Pushing to MongoDB
         v_resp = requests.post(f"{API_BASE_URL}/videos", json=video_metadata)
         v_resp.raise_for_status()
         print(f"Successfully ingested {len(video_metadata)} videos.")
+        timer.stop("Phase 1: Metadata Fetching")
     except Exception as e:
-        print(f"Failed to ingest videos to DB: {e}")
+        print(f"FAILED Phase 1: {e}")
         return
 
-    print("\n--- Phase 2: Fetching Transcripts & Comments ---")
+    # --- Phase 2: Content Collection ---
+    timer.start("Phase 2: Transcript & Comment Extraction")
+    try:
+        print(f"Processing {len(video_ids)} videos...")
+        get_comments(video_ids)
+        get_multi_transcripts(video_ids)
+    except Exception as e:
+        print(f"FAILED Phase 2: {e}")
+    finally:
+        timer.stop("Phase 2: Transcripts & Comments")
 
-    print(f"Processing {len(video_ids)} videos...")
-
-    get_comments(video_ids)
-    get_multi_transcripts(video_ids)
-
-    print("\n--- Phase 3: Loading Transcript and Comment Data into MongoDB ---")
-
+    # --- Phase 3: DB Ingestion ---
+    timer.start("Phase 3: MongoDB Ingestion")
     files_to_ingest = [
         ("youtubeComments.json", f"{API_BASE_URL}/comments"),
         ("transcripts.json", f"{API_BASE_URL}/transcripts")
@@ -67,19 +103,25 @@ def run_pipeline(channel_ids=CHANNEL_IDS):
             with open(file_path, "r") as f:
                 data = json.load(f)
                 if data:
-                    print(f"Uploading {file_name}...")
                     try:
                         resp = requests.post(endpoint, json=data)
-                        print(f"Result for {file_name}: {resp.json()}")
+                        print(f"Result for {file_name}: {resp.status_code}")
                     except Exception as e:
                         print(f"Error uploading {file_name}: {e}")
+    timer.stop("Phase 3: MongoDB Ingestion")
 
-    print("\n--- Phase 4: Intelligence & Trends ---")
-    run_llm_extraction() # claim extraction
+    # --- Phase 4: Intelligence ---
+    timer.start("Phase 4: LLM Claim Extraction")
+    try:
+        run_llm_extraction()
+    except Exception as e:
+        print(f"FAILED Phase 4: {e}")
+    finally:
+        timer.stop("Phase 4: LLM Claim Extraction")
 
-    # narrative building later
-
-    print(f"\n[{datetime.now()}] Pipeline Task Completed Successfully.")
+    # Final reporting
+    timer.get_summary()
+    print(f"\n[{datetime.now()}] Pipeline Task Completed.")
 
 if __name__ == "__main__":
     run_pipeline()
