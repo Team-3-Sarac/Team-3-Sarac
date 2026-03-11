@@ -67,7 +67,7 @@ def extract_claims(data: list | str, source: str) -> list:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}]
         )
 
