@@ -1,0 +1,57 @@
+name: Container Maintenance
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"   # Every Sunday at 4:00 AM UTC
+  workflow_dispatch:       # Allow manual trigger
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run maintenance via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USERNAME }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            COMPOSE_FILE="/Team-3-Sarac/docker-compose.yml"
+
+            echo "=== Container Health Check ==="
+            SERVICES=$(docker compose -f "$COMPOSE_FILE" ps --format '{{.Name}}')
+            for svc in $SERVICES; do
+              status=$(docker inspect --format='{{.State.Health.Status}}' "$svc" 2>/dev/null || echo "no healthcheck")
+              echo "$svc: $status"
+              if [ "$status" = "unhealthy" ]; then
+                echo "  -> Restarting unhealthy container: $svc"
+                docker restart "$svc"
+              fi
+            done
+
+            echo ""
+            echo "=== Docker Cleanup ==="
+            echo "Pruning stopped containers..."
+            docker container prune -f
+
+            echo "Removing dangling images..."
+            docker image prune -f
+
+            echo "Removing images older than 7 days..."
+            docker image prune -af --filter "until=168h" || true
+
+            echo "Pruning unused networks..."
+            docker network prune -f
+
+            echo "Pruning build cache older than 7 days..."
+            docker builder prune -f --filter "until=168h" || true
+
+            echo ""
+            echo "=== Disk Usage ==="
+            docker system df
+
+            echo ""
+            echo "=== Running Containers ==="
+            docker compose -f "$COMPOSE_FILE" ps
