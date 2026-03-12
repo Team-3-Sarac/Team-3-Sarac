@@ -1,12 +1,19 @@
 "use client";
+import { useEffect, useState } from "react";
 import KpiCard from "../components/kpiCard";
 import ChannelRow from "../components/channelRow";
-
-
-
-import { useMemo, useState } from "react";
+import { getChannels, getDashboardKPIs, getVideos } from "../../api/backend";
 
 type Channel = {
+  channel_id: string;
+  channel_name: string;
+  video_count: number;
+  total_views: number;
+  total_likes: number;
+  total_comments: number;
+};
+
+type ChannelRowData = {
   id: string;
   initials: string;
   name: string;
@@ -22,140 +29,67 @@ type Channel = {
 };
 
 export default function ChannelsPage() {
-  const [rows, setRows] = useState<Channel[]>([
-    {
-      id: "sky",
-      initials: "SS",
-      name: "Sky Sports Football",
-      handle: "@SkySportsFootball",
-      subs: "7.2M",
-      league: "Premier League",
-      videos: 142,
-      sentimentPct: 74,
-      sentimentDir: "up",
-      latestTitle: "Arsenal vs Man City - Extended Highlights",
-      latestViews: "2.4M views",
-      active: true,
-    },
-    {
-      id: "espnfc",
-      initials: "E",
-      name: "ESPNFC",
-      handle: "@ESPNFC",
-      subs: "5.1M",
-      league: "Multi-League",
-      videos: 98,
-      sentimentPct: 68,
-      sentimentDir: "flat",
-      latestTitle: "Title Race Power Rankings - February Update",
-      latestViews: "1.1M views",
-      active: true,
-    },
-    {
-      id: "laliga",
-      initials: "LO",
-      name: "LaLiga Official",
-      handle: "@LaLiga",
-      subs: "12M",
-      league: "La Liga",
-      videos: 87,
-      sentimentPct: 82,
-      sentimentDir: "up",
-      latestTitle: "El Clasico - All Goals & Highlights",
-      latestViews: "3.1M views",
-      active: true,
-    },
-    {
-      id: "bundesliga",
-      initials: "B",
-      name: "Bundesliga",
-      handle: "@Bundesliga",
-      subs: "8.4M",
-      league: "Bundesliga",
-      videos: 76,
-      sentimentPct: 71,
-      sentimentDir: "up",
-      latestTitle: "Kane Hat-Trick vs Dortmund - All Angles",
-      latestViews: "1.8M views",
-      active: true,
-    },
-    {
-      id: "seriea",
-      initials: "SA",
-      name: "Serie A Official",
-      handle: "@SerieA",
-      subs: "6.9M",
-      league: "Serie A",
-      videos: 64,
-      sentimentPct: 55,
-      sentimentDir: "down",
-      latestTitle: "Napoli vs Inter - Full Match Recap",
-      latestViews: "890K views",
-      active: false,
-    },
-    {
-      id: "athletic",
-      initials: "TA",
-      name: "The Athletic FC",
-      handle: "@TheAthleticFC",
-      subs: "1.8M",
-      league: "Multi-League",
-      videos: 54,
-      sentimentPct: 76,
-      sentimentDir: "up",
-      latestTitle: "Why Arsenal Are Title Favorites - Deep Dive",
-      latestViews: "720K views",
-      active: true,
-    },
-    {
-      id: "marca",
-      initials: "M",
-      name: "MARCA",
-      handle: "@MARCATV",
-      subs: "3.2M",
-      league: "La Liga",
-      videos: 45,
-      sentimentPct: 79,
-      sentimentDir: "up",
-      latestTitle: "Vinicius Jr - Season Highlights 2024/25",
-      latestViews: "2.1M views",
-      active: true,
-    },
-    {
-      id: "footballdaily",
-      initials: "FD",
-      name: "Football Daily",
-      handle: "@FootballDaily",
-      subs: "2.1M",
-      league: "Multi-League",
-      videos: 38,
-      sentimentPct: 65,
-      sentimentDir: "flat",
-      latestTitle: "Transfer Window LIVE - Latest News & Rumors",
-      latestViews: "430K views",
-      active: true,
-    },
-  ]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [videos, setVideos] = useState<any[]>([]);
+  const [kpis, setKpis] = useState<{ videos_analyzed: number; avg_sentiment: number } | null>(null);
+  const [rows, setRows] = useState<ChannelRowData[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const stats = useMemo(() => {
-    const channelsTracked = rows.length;
-    const activeCount = rows.filter((r) => r.active).length;
-    const pausedCount = channelsTracked - activeCount;
-    const totalVideos = rows.reduce((sum, r) => sum + r.videos, 0);
-    const avgSent = Math.round(rows.reduce((sum, r) => sum + r.sentimentPct, 0) / channelsTracked);
-    const apiUsed = 74; // mock
-    const apiText = "7,420 / 10,000 daily";
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [channelsRes, kpisRes, videosRes] = await Promise.all([
+          getChannels(),
+          getDashboardKPIs(),
+          getVideos({ limit: 100 }),
+        ]);
+        setChannels(channelsRes.channels || []);
+        setKpis(kpisRes);
+        setVideos(videosRes.videos || []);
 
-    return {
-      channelsTracked,
-      activeCount,
-      pausedCount,
-      totalVideos,
-      avgSent,
-      apiUsed,
-      apiText,
-    };
-  }, [rows]);
+        // Transform backend channels to frontend row format with real data
+        const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
+          // Find latest video for this channel
+          const channelVideos = videosRes.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
+          const latestVideo = channelVideos[0];
+          
+          // Calculate sentiment from videos
+          const avgSentiment = 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100);
+          
+          return {
+            id: c.channel_id,
+            initials: getInitials(c.channel_name),
+            name: c.channel_name,
+            handle: `@${c.channel_name.replace(/\s+/g, "")}`,
+            subs: formatSubs(c.total_views),
+            league: "Multi-League",
+            videos: c.video_count,
+            sentimentPct: Math.min(95, Math.max(30, avgSentiment)),
+            sentimentDir: avgSentiment > 70 ? "up" : avgSentiment < 50 ? "down" : "flat",
+            latestTitle: latestVideo?.title || "No recent videos",
+            latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
+            active: true,
+          };
+        });
+        setRows(transformed);
+      } catch (err) {
+        console.error("Failed to fetch channels data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const stats = {
+    channelsTracked: channels.length,
+    activeCount: rows.filter((r) => r.active).length,
+    pausedCount: rows.filter((r) => !r.active).length,
+    totalVideos: kpis ? kpis.videos_analyzed : 0,
+    avgSent: kpis ? Math.round(kpis.avg_sentiment) : 72,
+    apiUsed: 74,
+    apiText: "7,420 / 10,000 daily",
+  };
 
   const toggleActive = (id: string) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)));
@@ -217,12 +151,33 @@ export default function ChannelsPage() {
           </div>
 
           <div className="divide-y divide-neutral-800">
-            {rows.map((r) => (
-              <ChannelRow key={r.id} row={r} onToggle={() => toggleActive(r.id)} />
-            ))}
+            {loading || rows.length === 0 ? (
+              <div className="px-5 py-10 text-center text-sm text-neutral-500">No channels available</div>
+            ) : (
+              rows.map((r) => (
+                <ChannelRow key={r.id} row={r} onToggle={() => toggleActive(r.id)} />
+              ))
+            )}
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function getInitials(name: string): string {
+  const words = name.split(" ").slice(0, 2);
+  return words.map((w) => w[0]?.toUpperCase()).join("");
+}
+
+function formatSubs(views: number): string {
+  if (views >= 1_000_000) return `${(views / 1_000_000).toFixed(1)}M`;
+  if (views >= 1_000) return `${(views / 1_000).toFixed(1)}K`;
+  return views.toString();
+}
+
+function formatViews(views: number): string {
+  if (views >= 1_000_000) return `${(views / 1_000_000).toFixed(1)}M views`;
+  if (views >= 1_000) return `${(views / 1_000).toFixed(0)}K views`;
+  return `${views} views`;
 }

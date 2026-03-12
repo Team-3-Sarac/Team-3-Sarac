@@ -1,15 +1,16 @@
 "use client";
+import { useEffect, useState } from "react";
 import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
 import KpiCard from "../components/kpiCard";
+import SentimentChart from "../components/sentimentChart";
+import { getDashboardKPIs, getLeagueStats, getVideos } from "../../api/backend";
 
 import {
   TrendingUp,
   Video,
   Activity,
   Users,
-  ArrowUpRight,
-  ArrowDownRight,
   Play,
   Clock,
   Eye,
@@ -19,7 +20,99 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
+type KPIs = {
+  videos_analyzed: number;
+  trending_topics: number;
+  avg_sentiment: number;
+  channels_tracked: number;
+  videos_this_week: number;
+  topics_since_yesterday: number;
+};
+
+type League = {
+  league: string;
+  count: number;
+  status: string;
+};
+
+type VideoData = {
+  video_id: string;
+  title: string;
+  channel_name: string;
+  league: string | null;
+  view_count: number;
+  like_count: number;
+  comment_count: number;
+  duration_seconds: number;
+  publish_date: string;
+};
+
 export default function DashboardPage() {
+  const [kpis, setKpis] = useState<KPIs | null>(null);
+  const [leagues, setLeagues] = useState<League[]>([]);
+  const [videos, setVideos] = useState<VideoData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [kpiRes, leagueRes, videoRes] = await Promise.all([
+          getDashboardKPIs(),
+          getLeagueStats(),
+          getVideos({ limit: 10 }),
+        ]);
+        setKpis(kpiRes);
+        setLeagues(leagueRes.leagues || []);
+        setVideos(videoRes.videos || []);
+      } catch (err) {
+        console.error("Failed to fetch dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const leagueCodeMap: Record<string, string> = {
+    "Premier League": "ENG",
+    "La Liga": "ESP",
+    Bundesliga: "GER",
+    "Serie A": "ITA",
+    "Ligue 1": "FRA",
+  };
+
+  const formatNumber = (num: number): string => {
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toString();
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const getSentimentTone = (): "pos" | "neu" | "neg" => {
+    if (!kpis) return "neu";
+    if (kpis.avg_sentiment >= 70) return "pos";
+    if (kpis.avg_sentiment >= 40) return "neu";
+    return "neg";
+  };
+
+  const getRelativeTime = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 1) return "Just now";
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "1 day ago";
+    return `${diffDays} days ago`;
+  };
+
   return (
     <div className="min-h-screen w-full bg-black text-white">
       <div className="mx-auto max-w-6xl px-6 py-10">
@@ -33,29 +126,29 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <KpiCard
             title="Videos Analyzed"
-            value="1,247"
-            sub="+83 this week"
+            value={kpis ? kpis.videos_analyzed.toLocaleString() : "..."}
+            sub={kpis ? `+${kpis.videos_this_week} this week` : ""}
             trend="up"
             icon={<Video className="h-4 w-4 text-neutral-400" />}
           />
           <KpiCard
             title="Trending Topics"
-            value="34"
-            sub="+12 since yesterday"
+            value={kpis ? kpis.trending_topics.toString() : "..."}
+            sub={kpis ? `+${kpis.topics_since_yesterday} since yesterday` : ""}
             trend="up"
             icon={<TrendingUp className="h-4 w-4 text-neutral-400" />}
           />
           <KpiCard
             title="Avg. Sentiment"
-            value="72%"
+            value={kpis ? `${Math.round(kpis.avg_sentiment)}%` : "..."}
             sub="+4.2% positive"
             trend="up"
             icon={<Activity className="h-4 w-4 text-neutral-400" />}
           />
           <KpiCard
             title="Channels Tracked"
-            value="18"
-            sub="5 leagues"
+            value={kpis ? kpis.channels_tracked.toString() : "..."}
+            sub={`${leagues.length} leagues`}
             trend="flat"
             icon={<Users className="h-4 w-4 text-neutral-400" />}
           />
@@ -63,7 +156,7 @@ export default function DashboardPage() {
 
         {/* Main Grid */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Sentiment Trend (mock chart) */}
+          {/* Sentiment Trend (real chart) */}
           <Card className="lg:col-span-2">
             <CardHeader
               title="Sentiment Trend"
@@ -82,64 +175,11 @@ export default function DashboardPage() {
               }
             />
             <div className="px-5 pb-5">
-              <div className="relative h-64 w-full overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950">
-                {/* grid lines */}
-                <div className="absolute inset-0 opacity-60">
-                  <div className="h-full w-full bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:56px_56px]" />
-                </div>
-
-                {/* Positive line (SVG) */}
-                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 700 260" preserveAspectRatio="none">
-                  <path
-                    d="M0,150 C80,120 120,110 180,120 C240,135 270,175 330,165 C400,150 420,110 480,118 C540,126 590,105 700,118"
-                    fill="none"
-                    stroke="rgb(56 189 248)" // sky-400
-                    strokeWidth="2.5"
-                  />
-                  <path
-                    d="M0,150 C80,120 120,110 180,120 C240,135 270,175 330,165 C400,150 420,110 480,118 C540,126 590,105 700,118 L700,260 L0,260 Z"
-                    fill="rgba(56,189,248,0.10)"
-                  />
-                </svg>
-
-                {/* Negative line */}
-                <svg className="absolute inset-0 h-full w-full" viewBox="0 0 700 260" preserveAspectRatio="none">
-                  <path
-                    d="M0,210 C90,230 150,240 210,220 C270,200 310,175 360,195 C410,215 460,230 520,225 C600,218 640,210 700,205"
-                    fill="none"
-                    stroke="rgb(239 68 68)" // red-500
-                    strokeWidth="2.5"
-                  />
-                  <path
-                    d="M0,210 C90,230 150,240 210,220 C270,200 310,175 360,195 C410,215 460,230 520,225 C600,218 640,210 700,205 L700,260 L0,260 Z"
-                    fill="rgba(239,68,68,0.10)"
-                  />
-                </svg>
-
-                {/* x labels */}
-                <div className="absolute bottom-3 left-0 right-0 flex justify-between px-6 text-[11px] text-neutral-500">
-                  <span>Mon</span>
-                  <span>Tue</span>
-                  <span>Wed</span>
-                  <span>Thu</span>
-                  <span>Fri</span>
-                  <span>Sat</span>
-                  <span>Sun</span>
-                </div>
-
-                {/* y labels */}
-                <div className="absolute left-3 top-3 flex h-[calc(100%-44px)] flex-col justify-between text-[11px] text-neutral-500">
-                  <span>100%</span>
-                  <span>75%</span>
-                  <span>50%</span>
-                  <span>25%</span>
-                  <span>0%</span>
-                </div>
-              </div>
+              <SentimentChart />
             </div>
           </Card>
 
-          {/* Key Events */}
+          {/* Key Events - Mock data as per user request */}
           <Card>
             <CardHeader title="Key Events" subtitle="Highlights detected across tracked leagues" />
             <div className="divide-y divide-neutral-800">
@@ -178,57 +218,25 @@ export default function DashboardPage() {
           <Card className="lg:col-span-2">
             <CardHeader title="Trending Match Content" subtitle="Most engaging soccer content from tracked channels" />
             <div className="divide-y divide-neutral-800">
-              <VideoRow
-                league="Premier League"
-                sentiment="positive 84%"
-                sentimentTone="pos"
-                title="Arsenal vs Manchester City — Premier League Highlights"
-                channel="Sky Sports Football"
-                duration="12:34"
-                views="2.4M"
-                likes="89K"
-                comments="12K"
-                age="6 hours ago"
-              />
-
-              <VideoRow
-                league="La Liga"
-                sentiment="positive 91%"
-                sentimentTone="pos"
-                title="Real Madrid vs Barcelona — El Clasico Full Analysis"
-                channel="LaLiga Official"
-                duration="15:21"
-                views="3.1M"
-                likes="120K"
-                comments="18K"
-                age="12 hours ago"
-              />
-
-              <VideoRow
-                league="Bundesliga"
-                sentiment="neutral 62%"
-                sentimentTone="neu"
-                title="Bayern Munich vs Dortmund — Der Klassiker Recap"
-                channel="Bundesliga"
-                duration="11:45"
-                views="1.8M"
-                likes="67K"
-                comments="8K"
-                age="1 day ago"
-              />
-
-              <VideoRow
-                league="Serie A"
-                sentiment="negative 38%"
-                sentimentTone="neg"
-                title="Napoli vs Inter Milan — Title Race Decider"
-                channel="Serie A Official"
-                duration="13:09"
-                views="1.2M"
-                likes="45K"
-                comments="6K"
-                age="2 days ago"
-              />
+              {loading || videos.length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm text-neutral-500">No videos available</div>
+              ) : (
+                videos.map((video) => (
+                  <VideoRow
+                    key={video.video_id}
+                    league={video.league || "Unknown"}
+                    sentiment={`positive ${Math.round(kpis?.avg_sentiment || 72)}%`}
+                    sentimentTone={getSentimentTone()}
+                    title={video.title}
+                    channel={video.channel_name}
+                    duration={formatDuration(video.duration_seconds)}
+                    views={formatNumber(video.view_count)}
+                    likes={formatNumber(video.like_count)}
+                    comments={formatNumber(video.comment_count)}
+                    age={getRelativeTime(video.publish_date)}
+                  />
+                ))
+              )}
             </div>
           </Card>
 
@@ -236,11 +244,19 @@ export default function DashboardPage() {
           <Card>
             <CardHeader title="League Overview" subtitle="Content volume & status by league" />
             <div className="divide-y divide-neutral-800">
-              <LeagueRow code="ENG" league="Premier League" count="412" status="Trending" />
-              <LeagueRow code="ESP" league="La Liga" count="287" status="Trending" />
-              <LeagueRow code="GER" league="Bundesliga" count="198" status="" />
-              <LeagueRow code="ITA" league="Serie A" count="189" status="" />
-              <LeagueRow code="FRA" league="Ligue 1" count="161" status="Trending" />
+              {loading || leagues.length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm text-neutral-500">No leagues available</div>
+              ) : (
+                leagues.map((league) => (
+                  <LeagueRow
+                    key={league.league}
+                    code={leagueCodeMap[league.league] || "UNK"}
+                    league={league.league}
+                    count={league.count.toString()}
+                    status={league.status}
+                  />
+                ))
+              )}
             </div>
           </Card>
         </div>

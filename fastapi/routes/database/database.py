@@ -14,6 +14,10 @@ client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@localhost:27017/
 
 db = client[mongo_name]
 
+print("mongo_root =", mongo_root)
+print("mongo_root_pass =", mongo_root_pass)
+print("mongo_name =", mongo_name)
+print("env_path =", env_path) 
 
 def ping():
     try:
