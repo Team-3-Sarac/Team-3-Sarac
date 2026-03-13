@@ -131,7 +131,7 @@ def filter_by_views(client, video_ids):
                     "comment_count": int(stats.get("commentCount", 0)),
                     "duration_seconds": parse_duration(item["contentDetails"]["duration"]),
                     "summary": None,
-                    "created_at": datetime.now(timezone.utc).isoformat() + "Z"
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 })
     return filtered
 
