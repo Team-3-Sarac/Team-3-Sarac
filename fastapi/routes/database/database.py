@@ -9,8 +9,9 @@ load_dotenv(dotenv_path=env_path)
 mongo_root = os.getenv("MONGO_ROOT_USERNAME")
 mongo_root_pass = os.getenv("MONGO_ROOT_PASSWORD")
 mongo_name = os.getenv("MONGO_DATABASE")
+mongo_host = os.getenv("MONGO_HOST", "localhost")
 
-client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@localhost:27017/admin")
+client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@{mongo_host}:27017/admin")
 
 db = client[mongo_name]
 

@@ -76,8 +76,10 @@ def run_pipeline(channel_ids=CHANNEL_IDS):
 
     print("\n--- Phase 4: Intelligence & Trends ---")
     run_llm_extraction() # claim extraction
-
-    # narrative building later
+   
+    # pam - added the narrative building pipeline
+    from pipeline.narrative_pipeline import run_pipeline as run_narrative_pipeline
+    run_narrative_pipeline()    
 
     print(f"\n[{datetime.now()}] Pipeline Task Completed Successfully.")
 
