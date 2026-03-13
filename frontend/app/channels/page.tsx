@@ -62,7 +62,7 @@ export default function ChannelsPage() {
             name: c.channel_name,
             handle: `@${c.channel_name.replace(/\s+/g, "")}`,
             subs: formatSubs(c.total_views),
-            league: "Multi-League",
+            league: getMostCommonLeague(channelVideos),
             videos: c.video_count,
             sentimentPct: Math.min(95, Math.max(30, avgSentiment)),
             sentimentDir: avgSentiment > 70 ? "up" : avgSentiment < 50 ? "down" : "flat",
@@ -180,4 +180,17 @@ function formatViews(views: number): string {
   if (views >= 1_000_000) return `${(views / 1_000_000).toFixed(1)}M views`;
   if (views >= 1_000) return `${(views / 1_000).toFixed(0)}K views`;
   return `${views} views`;
+}
+
+// league data temporarily blocked
+function getMostCommonLeague(videos: any[]): string {
+  if (!videos.length) return "Multi-League";
+  
+  const counts: Record<string, number> = {};
+  for (const v of videos) {
+    if (v.league) counts[v.league] = (counts[v.league] || 0) + 1;
+  }
+  
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return sorted[0]?.[0] || "Multi-League"; // if no videos or null
 }

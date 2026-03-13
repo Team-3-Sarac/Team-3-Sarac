@@ -256,8 +256,9 @@ def get_dashboard_kpis():
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     videos_this_week = db.videos.count_documents({"created_at": {"$gte": week_ago}})
 
-    # Topics since yesterday - stubbed
-    topics_since_yesterday = 12
+    # Topics since yesterday
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    topics_since_yesterday = db.trends.count_documents({"created_at": {"$gte": yesterday}})
 
     return {
         "videos_analyzed": videos_analyzed,
@@ -438,3 +439,22 @@ def get_channel_latest_video(channel_id: str):
         "view_count": latest_video.get("view_count", 0),
         "publish_date": latest_video["publish_date"].isoformat() if isinstance(latest_video["publish_date"], datetime) else latest_video["publish_date"]
     }
+
+
+@router.get("/events")
+def get_events(limit: int = Query(default=10, ge=1, le=100)):
+    """Get list of match events."""
+    cursor = db.match_events.find().sort("created_at", -1).limit(limit)
+    events = []
+    for doc in cursor:
+        events.append({
+            "id": str(doc["_id"]),
+            "video_id": str(doc.get("video_id", "")),
+            "event_type": doc.get("event_type", ""),
+            "team": doc.get("team"),
+            "player": doc.get("player"),
+            "match_minute": doc.get("match_minute"),
+            "description": doc.get("description", ""),
+            "created_at": doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
+        })
+    return {"events": events, "count": len(events)}

@@ -4,7 +4,7 @@ import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
 import KpiCard from "../components/kpiCard";
 import SentimentChart from "../components/sentimentChart";
-import { getDashboardKPIs, getLeagueStats, getVideos } from "../../api/backend";
+import { getDashboardKPIs, getLeagueStats, getVideos, getEvents } from "../../api/backend";
 
 import {
   TrendingUp,
@@ -52,18 +52,21 @@ export default function DashboardPage() {
   const [leagues, setLeagues] = useState<League[]>([]);
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [kpiRes, leagueRes, videoRes] = await Promise.all([
+        const [kpiRes, leagueRes, videoRes, eventsRes] = await Promise.all([
           getDashboardKPIs(),
           getLeagueStats(),
           getVideos({ limit: 10 }),
+          getEvents(5),
         ]);
         setKpis(kpiRes);
         setLeagues(leagueRes.leagues || []);
         setVideos(videoRes.videos || []);
+        setEvents(eventsRes.events || []);
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
       } finally {
@@ -183,31 +186,18 @@ export default function DashboardPage() {
           <Card>
             <CardHeader title="Key Events" subtitle="Highlights detected across tracked leagues" />
             <div className="divide-y divide-neutral-800">
-              <EventRow
-                icon={<Sparkles className="h-4 w-4 text-emerald-400" />}
-                title="Saka scores for Arsenal vs Man City (23')"
-                time="6h ago"
-              />
-              <EventRow
-                icon={<TrendingUp className="h-4 w-4 text-sky-400" />}
-                title="VAR overturns penalty in El Clasico"
-                time="12h ago"
-              />
-              <EventRow
-                icon={<AlertTriangle className="h-4 w-4 text-red-400" />}
-                title="Red card: Rodri tackle in 78th minute"
-                time="6h ago"
-              />
-              <EventRow
-                icon={<AlertTriangle className="h-4 w-4 text-amber-400" />}
-                title="Musiala subbed off with hamstring injury"
-                time="1d ago"
-              />
-              <EventRow
-                icon={<Sparkles className="h-4 w-4 text-emerald-400" />}
-                title="Kane hat-trick vs Dortmund"
-                time="1d ago"
-              />
+              {loading || events.length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm text-neutral-500">No events available</div>
+              ) : (
+                events.map((event) => (
+                  <EventRow
+                    key={event.id}
+                    icon={getEventIcon(event.event_type)}
+                    title={event.description}
+                    time={getRelativeTime(event.created_at)}
+                  />
+                ))
+              )}
             </div>
           </Card>
         </div>
@@ -277,6 +267,16 @@ function EventRow({ icon, title, time }: { icon: React.ReactNode; title: string;
       </div>
     </div>
   );
+}
+
+function getEventIcon(eventType: string) {
+  switch (eventType) {
+    case "goal": return <Sparkles className="h-4 w-4 text-emerald-400" />;
+    case "red_card": return <AlertTriangle className="h-4 w-4 text-red-400" />;
+    case "injury": return <AlertTriangle className="h-4 w-4 text-amber-400" />;
+    case "var": return <TrendingUp className="h-4 w-4 text-sky-400" />;
+    default: return <Sparkles className="h-4 w-4 text-neutral-400" />;
+  }
 }
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "pos" | "neu" | "neg" }) {

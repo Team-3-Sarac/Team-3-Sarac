@@ -152,8 +152,8 @@ export default function TrendsPage() {
                   trends.map((trend) => (
                     <TopicRow
                       key={trend.id}
-                      hot={trend.trending_direction === "up" && trend.mention_count > 5}
-                      topic={trend.league || "General Topic"}
+                      hot={trend.trending_direction === "up" && trend.score >= 0.75}
+                      topic={narratives.find((n) => n.id === trend.narrative_id)?.title || trend.league || "General Topic"}
                       mentions={trend.mention_count.toString()}
                       change={formatChange(trend.trending_direction, trend.mention_count)}
                       changeDir={getChangeDir(trend.trending_direction)}
