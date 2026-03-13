@@ -154,7 +154,7 @@ export async function getSentimentHistory() {
 }
 
 export async function getTrendsHistory() {
-  const res = await fetch(`${API_BASE}/trends/history`);
+  const res = await fetch(`${API_BASE}/ingest/trends/history`);
   if (!res.ok) throw new Error("Failed to fetch trends history");
   return res.json();
 }
@@ -162,5 +162,14 @@ export async function getTrendsHistory() {
 export async function getChannelLatestVideo(channelId: string) {
   const res = await fetch(`${API_BASE}/ingest/channels/${channelId}/latest-video`);
   if (!res.ok) throw new Error("Failed to fetch channel latest video");
+  return res.json();
+}
+
+export async function getEvents(limit?: number) {
+  const searchParams = new URLSearchParams();
+  if (limit) searchParams.set("limit", limit.toString());
+
+  const res = await fetch(`${API_BASE}/ingest/events?${searchParams.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch events");
   return res.json();
 }
