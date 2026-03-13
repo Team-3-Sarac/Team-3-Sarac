@@ -5,18 +5,15 @@ from .schema import VideoIn, CommentIn, TranscriptIn
 
 router = APIRouter()
 
-
 def parse_iso(value: str) -> datetime:
     cleaned = value.replace("Z", "+00:00")
     return datetime.fromisoformat(cleaned)
 
-
 def strip_none(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if v is not None}
 
-
 @router.post("/videos")
-def ingest_videos(videos: list[VideoIn]):
+async def ingest_videos(videos: list[VideoIn]):
     if not videos:
         raise HTTPException(status_code=400, detail="Empty video list")
 
@@ -40,22 +37,25 @@ def ingest_videos(videos: list[VideoIn]):
         }
         docs.append(strip_none(doc))
 
-    result = db.videos.insert_many(docs)
+    # motor requires await for db operations
+    result = await db.videos.insert_many(docs)
     return {"inserted": len(result.inserted_ids)}
 
-
-def _build_video_id_lookup() -> dict[str, object]:
+async def _build_video_id_lookup() -> dict[str, object]:
     """Map youtube_video_id -> MongoDB ObjectId for all videos in the DB."""
+    # Motor uses 'async for' or 'to_list()' for cursors
     cursor = db.videos.find({}, {"youtube_video_id": 1})
-    return {doc["youtube_video_id"]: doc["_id"] for doc in cursor}
-
+    lookup = {}
+    async for doc in cursor:
+        lookup[doc["youtube_video_id"]] = doc["_id"]
+    return lookup
 
 @router.post("/comments")
-def ingest_comments(comments: list[CommentIn]):
+async def ingest_comments(comments: list[CommentIn]):
     if not comments:
         raise HTTPException(status_code=400, detail="Empty comment list")
 
-    lookup = _build_video_id_lookup()
+    lookup = await _build_video_id_lookup()
 
     docs = []
     skipped = []
@@ -76,7 +76,7 @@ def ingest_comments(comments: list[CommentIn]):
 
     inserted = 0
     if docs:
-        result = db.comments.insert_many(docs)
+        result = await db.comments.insert_many(docs)
         inserted = len(result.inserted_ids)
 
     resp = {"inserted": inserted}
@@ -86,13 +86,12 @@ def ingest_comments(comments: list[CommentIn]):
         resp["skipped_count"] = len(skipped)
     return resp
 
-
 @router.post("/transcripts")
-def ingest_transcripts(transcripts: list[TranscriptIn]):
+async def ingest_transcripts(transcripts: list[TranscriptIn]):
     if not transcripts:
         raise HTTPException(status_code=400, detail="Empty transcript list")
 
-    lookup = _build_video_id_lookup()
+    lookup = await _build_video_id_lookup()
     now = datetime.now(timezone.utc)
 
     docs = []
@@ -116,7 +115,7 @@ def ingest_transcripts(transcripts: list[TranscriptIn]):
 
     inserted = 0
     if docs:
-        result = db.transcript_chunks.insert_many(docs)
+        result = await db.transcript_chunks.insert_many(docs)
         inserted = len(result.inserted_ids)
 
     resp = {"inserted": inserted}
