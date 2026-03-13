@@ -1,5 +1,6 @@
 import json
 import asyncio
+import os
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
@@ -61,7 +62,6 @@ async def get_comments(video_ids):
     return all_comments
 
 if __name__ == "__main__":
-    import os
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
     file_path = os.path.join(parent_dir, "data", "youtubeComments.json")
