@@ -1,14 +1,15 @@
 """
 narrative grouping and embeddings pipeline :
-This is the missing link between the claim extractions and 
-trend scoring. It reads the 305 claims and their generated 
-embedding vectors from mongoDB.
+It reads the claims and their generated 
+embedding vectors from qdrant.
 It clusters similar claims together into narratives and 
 generated a label for each narrative using LLM.
 writes the final result to the 'narratives' collection
 in mongoDB.
 
 narrative_pipeline.py depends on LLM.py
+fixed : embeddings are stored and retrieved from qdrant not
+mongodb now c':
 """
 import sys
 import os
@@ -21,6 +22,13 @@ from bson import ObjectId
 import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import normalize
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+import uuid
+
+qdrant = QdrantClient(url="http://localhost:6333")
+
+QDRANT_COLLECTION = "claims_embeddings"
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -29,7 +37,6 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # loading claims from mongoDB and looks up the embedding vectos from 
 # embeddings collection, returns a list 
 def load_claims_with_embeddings():
-
     print("Loading claims and embeddings...")
 
     claims = list(db.claims.find())
@@ -42,24 +49,30 @@ def load_claims_with_embeddings():
 
     for claim in claims:
         embedding_id = claim.get("embedding_id")
-        if not embedding_id:
+        if embedding_id is None:
             continue
+        try:
+            # fetch vector from Qdrant using the string UUID
+            results = qdrant.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[str(embedding_id)],
+                with_vectors=True
+            )
+            if not results or not results[0].vector:
+                continue
+            enriched.append({
+                "claim": claim,
+                "vector": results[0].vector
+            })
 
-        emb_doc = db.embeddings.find_one({"_id": embedding_id})
-        if not emb_doc or not emb_doc.get("embedding"):
+        except Exception as e:
+            print(f"  [error] Qdrant fetch failed for claim {claim['_id']}: {e}")
             continue
-
-        enriched.append({
-            "claim": claim,
-            "vector": emb_doc["embedding"]
-        })
 
     print(f"  Loaded {len(enriched)} claims with embeddings.")
     return enriched
-
 #clusters embeddings
 # claims with labels -1 are noise/ semantically unrelated and not grouped 
-#
 
 def cluster_claims(enriched_claims, eps=0.15, min_samples=2):
 
@@ -84,7 +97,6 @@ def cluster_claims(enriched_claims, eps=0.15, min_samples=2):
 
     print(f"  Found {len(clusters)} narrative clusters.")
     return clusters
-
 
 # labels each cluster 
 def label_narrative(claims_in_cluster):
@@ -158,7 +170,7 @@ def save_narrative(narrative_label, claims_in_cluster, sentiment_summary):
     # collect claim ObjectIds
     claim_ids = [item["claim"]["_id"] for item in claims_in_cluster]
 
-    # get league from first claim that has one (fallback to unknown)
+    # get league from first claim that has one 
     league = "unknown"
     for item in claims_in_cluster:
         meta_league = item["claim"].get("metadata", {}).get("league")
@@ -170,14 +182,19 @@ def save_narrative(narrative_label, claims_in_cluster, sentiment_summary):
     vectors = np.array([item["vector"] for item in claims_in_cluster])
     centroid = vectors.mean(axis=0).tolist()
 
-    # save centroid embedding and get its ID
-    centroid_doc = {
-        "claim_text": f"[centroid] {narrative_label}",
-        "embedding": centroid,
-        "created_at": datetime.now(timezone.utc)
-    }
-    centroid_result = db.embeddings.insert_one(centroid_doc)
-    embedding_id = centroid_result.inserted_id
+    # save centroid embedding to Qdrant
+    centroid_id = str(uuid.uuid4())
+    qdrant.upsert(
+        collection_name=QDRANT_COLLECTION,
+        points=[
+            PointStruct(
+                id=centroid_id,
+                vector=centroid,
+                payload={"claim_text": f"[centroid] {narrative_label}"}
+            )
+        ]
+    )
+    embedding_id = centroid_id
 
     # build readable description from sentiment summary
     description = (
@@ -207,11 +224,6 @@ def save_narrative(narrative_label, claims_in_cluster, sentiment_summary):
     print(f"  [saved] Narrative: '{narrative_label}' | {len(claim_ids)} claims | league: {league}")
 
 def run_pipeline():
-    """
-    Full narrative pipeline:
-    Load → Cluster → Label → Sentiment → Save
-    Plug this into run_pipeline.py Phase 4.
-    """
     print("\n--- Narrative Grouping & Embeddings Pipeline ---")
 
     # load
