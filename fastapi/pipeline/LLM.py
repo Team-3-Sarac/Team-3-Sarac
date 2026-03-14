@@ -1,8 +1,9 @@
 """
-LLM Claim Extraction Pipeline:
+Fixed LLM Claim Extraction Pipeline:
 - reads transcript chunks and comments from MongoDB
 - uses an LLM to extract claims from the text
-- stores claims in 'claims' collection with reference to embeddings
+- stores embeddings in qdrant vector db
+- stores claims in mongodb referencing the vector id 
 - handles edge cases: missing fields, empty text, null league/teams
 """
 
@@ -15,6 +16,25 @@ from openai import OpenAI
 import json
 from datetime import datetime, timezone
 
+# integrating qdrant 
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
+ #uses uuid for unique ids
+import uuid
+qdrant = QdrantClient(url="http://localhost:6333")
+
+QDRANT_COLLECTION = "claims_embeddings"
+
+def init_qdrant_collection():
+    collections = [c.name for c in qdrant.get_collections().collections]
+    if QDRANT_COLLECTION not in collections:
+        qdrant.create_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+        )
+        print(f"  [qdrant] Created collection: {QDRANT_COLLECTION}")
+    else:
+        print(f"  [qdrant] Collection already exists: {QDRANT_COLLECTION}")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -51,10 +71,6 @@ TEXT:
 
 
 def extract_claims(text: str) -> list:
-    """
-    Sends text to the LLM and returns extracted claims.
-    Returns empty list on failure or no claims.
-    """
     #empty or whitespace-only text
     if not text or not text.strip():
         return []
@@ -94,10 +110,6 @@ def extract_claims(text: str) -> list:
 
 
 def create_embedding(text: str):
-    """
-    Generate an embedding vector for a claim.
-    Returns None on failure.
-    """
     if not text or not text.strip():
         return None
 
@@ -114,24 +126,28 @@ def create_embedding(text: str):
 
 
 def save_embedding(claim_text: str):
-    """
-    Store embedding in its own collection and return the embedding_id.
-    This satisfies the acceptance criteria of storing embedding_id as a reference.
-    """
     embedding = create_embedding(claim_text)
-
     if embedding is None:
         return None, None
-
-    embedding_doc = {
-        "claim_text": claim_text,
-        "embedding": embedding,
-        "created_at": datetime.now(timezone.utc)
-    }
-
-    result = db.embeddings.insert_one(embedding_doc)
-    return result.inserted_id, embedding
-
+    qdrant_id = str(uuid.uuid4())
+    qdrant.upsert(
+        collection_name=QDRANT_COLLECTION,
+        points=[
+            PointStruct(
+                id=qdrant_id,
+                vector=embedding,
+                # better for debugging and filtering when
+                # doing vector search 
+                payload={
+                    "claim_text": claim_text,
+                     #"video_id": video_id,
+                    #"source_type": source_type
+                    }
+            )
+        ]
+    )
+    print(f"  [qdrant] Saved embedding id: {qdrant_id}")
+    return qdrant_id, embedding
 
 def save_claim(video_id, chunk_id, source_type, claim_text, quote, metadata=None):
     """
@@ -288,14 +304,11 @@ def process_comments():
 
 
 def run_pipeline():
-    """
-    Run full extraction pipeline.
-    """
-    print("Starting claim extraction pipeline...")
 
+    print("Starting claim extraction pipeline...")
+    init_qdrant_collection()
     process_transcript_chunks()
     process_comments()
-
     total_claims = db.claims.count_documents({})
     print(f"\nClaim extraction pipeline complete. Total claims in DB: {total_claims}")
 
