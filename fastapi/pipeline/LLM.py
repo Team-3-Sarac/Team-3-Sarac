@@ -47,18 +47,20 @@ Rules:
 - Every claim must include the exact supporting quote from the text.
 - If a claim is separated between multiple transcript chunks, return the source_id of the first chunk.
 - Ignore filler words, greetings, or irrelevant commentary.
-- If there are no extractable claims, return an empty array: []
+- If there are no extractable claims, return an empty claims array.
 
-Return ONLY valid JSON with no explanation.
+Return ONLY valid JSON.
 
 Format:
-[
-  {{
-    "source_id": "...",
-    "claim": "...",
-    "quote": "..."
-  }}
-]
+{{
+  "claims": [
+    {{
+      "source_id": "...",
+      "claim": "...",
+      "quote": "..."
+    }}
+  ]
+}}
 
 TEXT:
 {entries}
@@ -78,27 +80,16 @@ async def extract_claims(data: list, source: str, vid: str, retries=3) -> list:
 
             response = await client.chat.completions.create(
                 model="gpt-4.1-mini",
+                response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}]
             )
 
             content = response.choices[0].message.content.strip()
 
-            # Remove markdown if model adds it
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-
             parsed = json.loads(content)
 
-            if isinstance(parsed, list):
-                return parsed
-
             if isinstance(parsed, dict):
-                for v in parsed.values():
-                    if isinstance(v, list):
-                        return v
+                return parsed.get("claims", [])
 
             return []
 
