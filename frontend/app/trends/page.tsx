@@ -1,17 +1,88 @@
 "use client";
+import { useEffect, useState } from "react";
 import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
 import LegendDot from "../components/legendDot";
-import BarChartMock from "../components/barChartMock";
-import LineChartMock from "../components/lineChartMock";
+import BarChart from "../components/barChart";
+import LineChart from "../components/lineChart";
 import TopicRow from "../components/topicRow";
 import Claims from "../components/claims";
-
-
+import { getTrends, getLeagueStats, getNarratives, getClaims } from "../../api/backend";
 
 import { Flame, TrendingUp, TrendingDown } from "lucide-react";
 
+type Trend = {
+  id: string;
+  narrative_id: string;
+  league: string | null;
+  time_window: string;
+  mention_count: number;
+  trending_direction: string;
+  score: number;
+  created_at: string;
+};
+
+type Narrative = {
+  id: string;
+  title: string;
+  league: string | null;
+  claims_ids: string[];
+  created_at: string;
+};
+
+type League = {
+  league: string;
+  count: number;
+  status: string;
+};
+
 export default function TrendsPage() {
+  const [trends, setTrends] = useState<Trend[]>([]);
+  const [narratives, setNarratives] = useState<Narrative[]>([]);
+  const [leagues, setLeagues] = useState<League[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [trendsRes, leagueRes, narrativesRes] = await Promise.all([
+          getTrends(),
+          getLeagueStats(),
+          getNarratives(),
+        ]);
+        setTrends(trendsRes.trends || []);
+        setLeagues(leagueRes.leagues || []);
+        setNarratives(narrativesRes.narratives || []);
+      } catch (err) {
+        console.error("Failed to fetch trends data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const getChangeDir = (direction: string): "up" | "down" | "flat" => {
+    if (direction === "up") return "up";
+    if (direction === "down") return "down";
+    return "flat";
+  };
+
+  const formatChange = (direction: string, mentionCount: number): string => {
+    if (direction === "up") return `+${Math.min(Math.round(mentionCount / 10), 50)}%`;
+    if (direction === "down") return `-${Math.min(Math.round(mentionCount / 10), 20)}%`;
+    return "0%";
+  };
+
+  const getTopicLeagues = (trend: Trend): string[] => {
+    const result: string[] = [];
+    if (trend.league) result.push(trend.league.length > 12 ? trend.league.substring(0, 12) + "…" : trend.league);
+    if (leagues.length > 0 && leagues[0]?.league !== trend.league) {
+      result.push(leagues[0]?.league?.substring(0, 12) + "…" || "Multi");
+    }
+    return result.length > 0 ? result : ["Multi-League"];
+  };
+
   return (
     <div className="min-h-screen w-full bg-black text-white">
       <div className="mx-auto max-w-6xl px-6 py-10">
@@ -31,7 +102,7 @@ export default function TrendsPage() {
               subtitle="Videos analyzed per league this month"
             />
             <div className="p-5">
-              <BarChartMock />
+              <BarChart />
             </div>
           </Card>
 
@@ -41,7 +112,7 @@ export default function TrendsPage() {
               subtitle="Topic frequency over the past 6 weeks"
             />
             <div className="p-5">
-              <LineChartMock />
+              <LineChart />
               <div className="mt-4 flex flex-wrap gap-4 text-xs text-neutral-400">
                 <LegendDot color="bg-emerald-400" label="Transfers" />
                 <LegendDot color="bg-red-400" label="Injuries" />
@@ -51,7 +122,7 @@ export default function TrendsPage() {
             </div>
           </Card>
         </div>
-        
+
         {/* Claims */}
         <div className="mt-6">
           <Claims />
@@ -75,66 +146,21 @@ export default function TrendsPage() {
               </div>
 
               <div className="divide-y divide-neutral-800">
-                <TopicRow
-                  hot
-                  topic="Transfer Window Speculation"
-                  mentions="342"
-                  change="+28%"
-                  changeDir="up"
-                  leagues={["Premier …", "La Liga"]}
-                />
-                <TopicRow
-                  hot
-                  topic="VAR Controversy"
-                  mentions="287"
-                  change="+45%"
-                  changeDir="up"
-                  leagues={["Serie A", "Premier …"]}
-                />
-                <TopicRow
-                  topic="Title Race Analysis"
-                  mentions="256"
-                  change="+12%"
-                  changeDir="up"
-                  leagues={["Premier …", "La Liga", "+1"]}
-                />
-                <TopicRow
-                  topic="Player Injury Updates"
-                  mentions="198"
-                  change="-8%"
-                  changeDir="down"
-                  leagues={["Bundesliga", "Ligue 1"]}
-                />
-                <TopicRow
-                  topic="Managerial Changes"
-                  mentions="176"
-                  change="0%"
-                  changeDir="flat"
-                  leagues={["Serie A"]}
-                />
-                <TopicRow
-                  hot
-                  topic="Youth Academy Breakouts"
-                  mentions="134"
-                  change="+32%"
-                  changeDir="up"
-                  leagues={["La Liga", "Bundesliga"]}
-                />
-                <TopicRow
-                  hot
-                  topic="Champions League Predictions"
-                  mentions="298"
-                  change="+18%"
-                  changeDir="up"
-                  leagues={["Premier …", "La Liga", "+2"]}
-                />
-                <TopicRow
-                  topic="Tactical Evolution"
-                  mentions="112"
-                  change="-3%"
-                  changeDir="down"
-                  leagues={["Premier …"]}
-                />
+                {loading || trends.length === 0 ? (
+                  <div className="px-5 py-10 text-center text-sm text-neutral-500">No trends available</div>
+                ) : (
+                  trends.map((trend) => (
+                    <TopicRow
+                      key={trend.id}
+                      hot={trend.trending_direction === "up" && trend.mention_count > 5}
+                      topic={trend.league || "General Topic"}
+                      mentions={trend.mention_count.toString()}
+                      change={formatChange(trend.trending_direction, trend.mention_count)}
+                      changeDir={getChangeDir(trend.trending_direction)}
+                      leagues={getTopicLeagues(trend)}
+                    />
+                  ))
+                )}
               </div>
             </div>
           </Card>
