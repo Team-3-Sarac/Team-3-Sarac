@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from database import db
+from routes.database.database import db
 from bson import ObjectId
 
 def calculate_trends(time_window_days = 1):
