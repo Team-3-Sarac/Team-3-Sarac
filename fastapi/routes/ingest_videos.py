@@ -57,8 +57,8 @@ def is_relevant(snippet, keywords, exclude_keywords):
 
     return any(keyword in text for keyword in keywords)
 
-def get_recent_videos(client, playlist_id, keywords=None, exclude_keywords=None):
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
+def get_recent_videos(client, playlist_id, days_back=DAYS_BACK, keywords=None, exclude_keywords=None):
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
     video_ids = []
     next_page_token = None
 
