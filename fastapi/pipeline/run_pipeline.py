@@ -53,7 +53,7 @@ class StageTimer:
         print(f"{'TOTAL RUNTIME':.<30} {total_dist:>7.2f}s")
         print("="*40)
 
-async def run_main_pipeline(channel_ids=CHANNEL_IDS):
+async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
     timer = StageTimer()
     overall_start = datetime.now()
     print(f"[{overall_start}] Starting Weekly Ingestion Pipeline...")
@@ -61,7 +61,7 @@ async def run_main_pipeline(channel_ids=CHANNEL_IDS):
     # --- Phase 1: Video Metadata ---
     timer.start("Phase 1: Video Metadata Fetching")
     try:
-        video_metadata = await ingest_from_channels(channel_ids, KEYWORDS, EXCLUDE_KEYWORDS)
+        video_metadata = await ingest_from_channels(channel_ids, days_back, KEYWORDS, EXCLUDE_KEYWORDS)
         if not video_metadata:
             print("No new videos found. Exiting pipeline.")
             return
