@@ -14,6 +14,8 @@ from routes.ingest_videos import ingest_from_channels, KEYWORDS, EXCLUDE_KEYWORD
 from routes.youtubeComments import get_comments
 from routes.transcript import get_multi_transcripts
 from pipeline.LLM import run_pipeline as run_llm_extraction
+from pipeline.sentiment import run_pipeline as run_sentiment
+from pipeline.narrative_pipeline import run_pipeline as run_narrative_building
 
 # Configuration
 API_BASE_URL = "http://localhost:8000/ingest"
@@ -56,7 +58,7 @@ class StageTimer:
 async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
     timer = StageTimer()
     overall_start = datetime.now()
-    print(f"[{overall_start}] Starting Weekly Ingestion Pipeline...")
+    print(f"[{overall_start}] Starting Ingestion Pipeline...")
 
     # --- Phase 1: Video Metadata ---
     timer.start("Phase 1: Video Metadata Fetching")
@@ -78,7 +80,7 @@ async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
         return
 
     # --- Phase 2: Content Collection ---
-    timer.start("Phase 2: Transcript & Comment Extraction")
+    timer.start("Phase 2: Transcripts & Comments")
     try:
         print(f"Processing {len(video_ids)} videos concurrently...")
         # Running both fetches at the same time
@@ -90,7 +92,7 @@ async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
         print(f"FAILED Phase 2: {e}")
         all_comments, all_transcripts = [], []
     finally:
-        timer.stop("Phase 2: Transcript & Comment Extraction")
+        timer.stop("Phase 2: Transcripts & Comments")
 
     # --- Phase 3: DB Ingestion ---
     timer.start("Phase 3: MongoDB Ingestion")
@@ -126,6 +128,24 @@ async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
         print(f"FAILED Phase 4: {e}")
     finally:
         timer.stop("Phase 4: LLM Claim Extraction")
+
+    # --- Phase 5: Sentiment Analysis---
+    timer.start("Phase 5: LLM Sentiment Analysis")
+    try:
+        await run_sentiment()
+    except Exception as e:
+        print(f"FAILED Phase 5: {e}")
+    finally:
+        timer.stop("Phase 5: LLM Sentiment Analysis")
+
+    # --- Phase 6: Narrative Building ---
+    timer.start("Phase 6: LLM Narrative Building")
+    try:
+        await run_narrative_building()
+    except Exception as e:
+        print(f"FAILED Phase 6: {e}")
+    finally:
+        timer.stop("Phase 6: LLM Narrative Building")
 
     timer.get_summary()
     print(f"\n[{datetime.now()}] Pipeline Task Completed.")
