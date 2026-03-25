@@ -6,4 +6,5 @@ transcription/venv/
 __pycache__/
 *.pyc
 .venv/
+.vscode/
 .idea/
