@@ -5,15 +5,19 @@ then stores results back to a sentiment collection in mongoDB
 """
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from routes.database.database import db
-from openai import OpenAI
+import asyncio
 import json
 from datetime import datetime, timezone
+from openai import AsyncOpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Add the parent directory to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from routes.database.database import db
 
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Semaphore to control concurrency and prevent rate limiting
+analysis_sem = asyncio.Semaphore(15)
 
 def build_sentiment_prompt(claim_text: str) -> str:
     return f"""
@@ -32,53 +36,43 @@ Rules:
 - Base your analysis ONLY on the claim text provided.
 - Do NOT hallucinate or assume context not present in the claim.
 - If no risk is detected, set risk_flags to ["none"] and risk_score to 0.0.
-- Return ONLY valid JSON with no explanation, no markdown, and no code fences.
+- You must return valid JSON.
 
 CLAIM:
 {claim_text}
 """
 
 
-def analyze_sentiment(claim_text: str) -> dict:
+async def analyze_sentiment(claim_text: str) -> dict:
     if not claim_text or not claim_text.strip():
-        return None
+        return {}
+
     prompt = build_sentiment_prompt(claim_text)
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content.strip()
-
-        if content.startswith("```"):
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-            content = content.strip()
-
         parsed = json.loads(content)
 
         if not isinstance(parsed, dict):
             print("Unexpected LLM response format, skipping.")
-            return None
+            return {}
 
         return parsed
 
     except json.JSONDecodeError as e:
         print(f"JSON parse error: {e}")
-        return None
+        return {}
     except Exception as e:
         print(f"Sentiment analysis error: {e}")
-        return None
+        return {}
 
 
-def save_sentiment(claim_id, video_id, source_type, analysis):
+async def save_sentiment(claim_id, video_id, source_type, analysis):
     if not analysis:
-        return
-
-    existing = db.sentiment.find_one({"claim_id": claim_id})
-    if existing:
-        print(f"  [skip] Duplicate sentiment for claim {claim_id}")
         return
 
     doc = {
@@ -94,44 +88,67 @@ def save_sentiment(claim_id, video_id, source_type, analysis):
         "created_at": datetime.now(timezone.utc)
     }
 
-    db.sentiment.insert_one(doc)
-    print(f"  [saved] sentiment for claim {claim_id} | tone: {doc['sentiment_tone']} | risk: {doc['risk_score']}")
+    await db.sentiment.insert_one(doc)
+    print(f"  [saved] sentiment for claim {claim_id} | tone: {doc['sentiment_tone']}")
 
 
-def process_claims():
-    print("Processing claims for sentiment analysis...")
+async def process_single_claim(claim):
+    """Worker function with concurrency control."""
+    claim_id = claim.get("_id")
+    claim_text = claim.get("claim_text")
+    video_id = claim.get("video_id")
+    source_type = claim.get("source_type")
 
-    claims = list(db.claims.find())
-
-    if not claims:
-        print("  [warning] No claims found in database.")
+    if not claim_text or not claim_text.strip() or not video_id:
         return
 
-    for claim in claims:
-        claim_id = claim.get("_id")
-        claim_text = claim.get("claim_text")
-        video_id = claim.get("video_id")
-        source_type = claim.get("source_type")
+    async with analysis_sem:
+        analysis = await analyze_sentiment(claim_text)
+        if analysis and analysis.get("sentiment_tone"):
+            await save_sentiment(claim_id, video_id, source_type, analysis)
 
-        if not claim_text or not claim_text.strip():
-            print(f"  [skip] Empty claim text for claim {claim_id}")
-            continue
 
-        if not video_id:
-            print(f"  [skip] Missing video_id for claim {claim_id}")
-            continue
+async def process_claims():
+    print("Filtering and processing unprocessed claims...")
 
-        analysis = analyze_sentiment(claim_text)
+    # Aggregation Pipeline:
+    # 1. Join claims with sentiment collection
+    # 2. Filter for claims that DON'T have a match in sentiment
+    pipeline = [
+        {
+            "$lookup": {
+                "from": "sentiment",
+                "localField": "_id",
+                "foreignField": "claim_id",
+                "as": "existing_sentiment"
+            }
+        },
+        {
+            "$match": {
+                "existing_sentiment": {"$size": 0}
+            }
+        }
+    ]
 
-        if not analysis:
-            print(f"  [info] No analysis returned for claim {claim_id}")
-            continue
+    cursor = db.claims.aggregate(pipeline)
+    unprocessed_claims = await cursor.to_list(length=None)
 
-        save_sentiment(claim_id, video_id, source_type, analysis)
-def run_pipeline():
+    if not unprocessed_claims:
+        print("  [info] All claims have already been processed.")
+        return
+
+    print(f"  [batch] Found {len(unprocessed_claims)} new claims to analyze.")
+
+    tasks = [process_single_claim(claim) for claim in unprocessed_claims]
+    await asyncio.gather(*tasks)
+
+
+async def run_pipeline():
     print("Starting sentiment analysis pipeline...")
-    process_claims()
-    total = db.sentiment.count_documents({})
-    print(f"\nSentiment analysis pipeline complete. Total sentiment docs in DB: {total}")
+    await process_claims()
+    total = await db.sentiment.count_documents({})
+    print(f"\nSentiment analysis pipeline complete. Total sentiment docs: {total}")
+
+
 if __name__ == "__main__":
-    run_pipeline()
+    asyncio.run(run_pipeline())
