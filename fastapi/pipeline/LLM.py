@@ -3,6 +3,7 @@ LLM Claim Extraction Pipeline:
 - Changed Embeddings: FastEmbed (Local, 384-dim)
 - Embedding Storage: Qdrant (Local)
 - Tracking: Multi-ID Source Mapping & Multi-League Detection
+- Verification: Mathematical Cosine Similarity Confidence Scoring
 """
 
 import sys
@@ -11,6 +12,7 @@ import json
 import asyncio
 import random
 import uuid
+import numpy as np
 from datetime import datetime, timezone
 from openai import AsyncOpenAI
 from qdrant_client import QdrantClient
@@ -35,6 +37,15 @@ MAX_CONCURRENT_REQUESTS = 45
 global_sem = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
 LLM_CHUNK_SIZE = 50
+
+def calculate_cosine_similarity(vec1, vec2):
+    """Calculates mathematical similarity between claim and source."""
+    dot_product = np.dot(vec1, vec2)
+    norm_a = np.linalg.norm(vec1)
+    norm_b = np.linalg.norm(vec2)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(dot_product / (norm_a * norm_b))
 
 def init_qdrant_collection(force_reset=False):
     if force_reset:
@@ -108,7 +119,7 @@ async def extract_claims(data: list, source: str, vid: str, retries=3) -> dict:
 async def get_embeddings_batch(texts: list[str], vid: str):
     if not texts: return []
     try:
-        print(f"[FastEmbed] Local vectorizing {len(texts)} claims for {vid}")
+        print(f"[FastEmbed] Local vectorizing {len(texts)} texts for {vid}")
         embeddings_generator = embedding_model.embed(texts)
         return list(embeddings_generator)
     except Exception as e:
@@ -129,51 +140,62 @@ async def save_embeddings_batch(texts: list[str], vectors: list):
     qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
     return [p.id for p in points]
 
-async def save_claims(video_id, source_type, extracted_data):
+async def save_claims(video_id, source_type, extracted_data, original_batch_data):
     if not extracted_data: return
     
     raw_claims = extracted_data.get("claims", [])
-    
-    # Process the comma-separated string into a list
     raw_leagues = extracted_data.get("detected_leagues", "Unknown")
     leagues_list = [l.strip() for l in raw_leagues.split(",") if l.strip()]
     
+    # Map source IDs to their text for lookup
+    source_map = {item['id']: item['text'] for item in original_batch_data}
+    
     texts, filtered = [], []
-
     for claim in raw_claims:
         text = claim.get("claim", "").strip()
         if not text: continue
-
-        # Check for duplicates
         exists = await db.claims.find_one({"video_id": video_id, "claim_text": text})
         if exists: continue
-
         texts.append(text)
         filtered.append(claim)
 
     if not texts: return
 
-    vectors = await get_embeddings_batch(texts, video_id)
-    if not vectors: return
+    # Generate vectors for the claims
+    claim_vectors = await get_embeddings_batch(texts, video_id)
+    if not claim_vectors: return
 
-    embedding_ids = await save_embeddings_batch(texts, vectors)
+    embedding_ids = await save_embeddings_batch(texts, claim_vectors)
 
     docs = []
     for i, claim in enumerate(filtered):
+        source_ids = claim.get("source_ids", [])
+        
+        # Determine mathematical confidence by comparing claim vector to source chunk vector
+        combined_source_text = " ".join([source_map.get(sid, "") for sid in source_ids]).strip()
+        
+        confidence_score = 0.0
+        if combined_source_text:
+            # Vectorize the combined source context
+            source_vector_gen = embedding_model.embed([combined_source_text])
+            source_vector = list(source_vector_gen)[0]
+            confidence_score = calculate_cosine_similarity(claim_vectors[i], source_vector)
+        
         docs.append({
             "video_id": video_id,
-            "chunk_ids": claim.get("source_ids", []), # Array of all relevant chunks
+            "chunk_ids": source_ids,
             "source_type": source_type,
             "claim_text": texts[i],
             "quote": claim.get("quote", "").strip() or None,
             "embedding_id": embedding_ids[i],
-            "leagues": leagues_list, # Now stores the full list detected in the batch
+            "leagues": leagues_list,
+            "confidence": round(confidence_score, 4),
             "created_at": datetime.now(timezone.utc)
         })
 
     if docs:
         await db.claims.insert_many(docs)
-        print(f"[Saved] {len(docs)} claims for {video_id} | Leagues: {', '.join(leagues_list)}")
+        print(f"[Saved] {len(docs)} claims for {video_id} | Avg Conf: {np.mean([d['confidence'] for d in docs]):.2f}")
 
 async def process_single_video(vid, source_type):
     exists = await db.claims.find_one({"video_id": vid, "source_type": source_type})
@@ -190,19 +212,16 @@ async def process_single_video(vid, source_type):
 
     print(f"[Start] {vid} ({source_type})")
 
-    # Internal helper to handle the batch lifecycle in parallel
     async def process_batch(batch_data):
         extracted_data = await extract_claims(batch_data, source_type, vid)
         if extracted_data:
-            await save_claims(vid, source_type, extracted_data)
+            await save_claims(vid, source_type, extracted_data, batch_data)
 
-    # Create tasks for all batches
     tasks = [
         process_batch(data[i : i + LLM_CHUNK_SIZE])
         for i in range(0, len(data), LLM_CHUNK_SIZE)
     ]
 
-    # Gather tasks to run them in parallel
     await asyncio.gather(*tasks)
 
 async def run_pipeline():
@@ -215,7 +234,7 @@ async def run_pipeline():
                   [process_single_video(v, "comment") for v in c_vids]
 
     await asyncio.gather(*video_tasks)
-    print(f"\nPipeline Complete. Claims saved with local embeddings and multi-league detection.")
+    print(f"\nPipeline Complete. Claims saved with mathematical confidence and local embeddings.")
 
 if __name__ == "__main__":
     asyncio.run(run_pipeline())
