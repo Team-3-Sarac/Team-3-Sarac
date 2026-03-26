@@ -1,6 +1,6 @@
 # ingestion plus filtering pipline
 # for each. ytube channel it gets :
-# uploads playlist ,pulls recent videos ( last 6 months )
+# uploads playlist ,pulls recent videos (defineed by days_back)
 # limit to 120 videos max
 # combines all result and prints the total
 
@@ -57,8 +57,8 @@ def is_relevant(snippet, keywords, exclude_keywords):
 
     return any(keyword in text for keyword in keywords)
 
-def get_recent_videos(client, playlist_id, keywords=None, exclude_keywords=None):
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
+def get_recent_videos(client, playlist_id, days_back=DAYS_BACK, keywords=None, exclude_keywords=None):
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
     video_ids = []
     next_page_token = None
 
@@ -78,7 +78,7 @@ def get_recent_videos(client, playlist_id, keywords=None, exclude_keywords=None)
                 "%Y-%m-%dT%H:%M:%SZ"
             ).replace(tzinfo=timezone.utc)
 
-            #stop if older than 6 months
+            #stop if older than cut off date
             if published_at < cutoff_date:
                 return video_ids
 
@@ -136,14 +136,14 @@ def filter_by_views(client, video_ids):
                 })
     return filtered
 
-def process_channel(channel_id, keywords, exclude_keywords):
+def process_channel(channel_id, days_back, keywords, exclude_keywords):
     client = get_youtube_client()
     try:
         print(f"Processing channel: {channel_id}")
         playlist_id = get_uploads_playlist(client, channel_id)
-        recent_videos = get_recent_videos(client, playlist_id, keywords, exclude_keywords)
+        recent_videos = get_recent_videos(client, playlist_id, days_back, keywords, exclude_keywords)
 
-        print(f"Recent (<= 7 days) for {channel_id}: {len(recent_videos)}")
+        print(f"Recent (<= {days_back} days) for {channel_id}: {len(recent_videos)}")
         filtered_videos = filter_by_views(client, recent_videos)
 
         print(f"Passed view filter (>5000) for {channel_id}: {len(filtered_videos)}")
@@ -163,9 +163,9 @@ from the last 6 months (filtered by keywords), and keeps videos with > 5000 view
 Returns:
     list: A list of dictionaries containing video IDs and relevant metadata.
 """
-async def ingest_from_channels(channel_ids, keywords, exclude_keywords):
+async def ingest_from_channels(channel_ids, days_back, keywords, exclude_keywords):
     all_videos = []
-    tasks = [asyncio.to_thread(process_channel, cid, keywords, exclude_keywords) for cid in channel_ids]
+    tasks = [asyncio.to_thread(process_channel, cid, days_back, keywords, exclude_keywords) for cid in channel_ids]
 
     results = await asyncio.gather(*tasks)
 
@@ -185,7 +185,7 @@ if __name__ == "__main__":
         "UC6UL29enLNe4mqwTfAyeNuw"
     ]
 
-    all_videos = asyncio.run(ingest_from_channels(channel_ids, KEYWORDS, EXCLUDE_KEYWORDS))
+    all_videos = asyncio.run(ingest_from_channels(channel_ids, DAYS_BACK, KEYWORDS, EXCLUDE_KEYWORDS))
 
 # Save results to JSON file
     script_dir = os.path.dirname(os.path.abspath(__file__))
