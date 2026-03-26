@@ -1,8 +1,8 @@
 """
-Weighted algorithmic trend scoring approach (Bella)
+Weighted algorithmic trend scoring approach
 
 Input:
-  1. MongoDB — used when MONGO_ROOT_USERNAME, MONGO_ROOT_PASSWORD, and MONGO_DATABASE are present in the environment (prod-level)
+  1. MongoDB - used when MONGO_ROOT_USERNAME, MONGO_ROOT_PASSWORD, and MONGO_DATABASE are present in the environment (prod-level)
   2. JSON - used when cannot connect to MongoDB, fallback for development when DB is not yet populated by our orchestrator script
 
 Output:
@@ -11,7 +11,6 @@ Output:
 
 import json
 import os
-import sys
 from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
@@ -26,7 +25,7 @@ VIDEOS_PATH = BASE_DIR / "data" / "filtered_videos.json"
 COMMENTS_PATH = BASE_DIR / "data" / "youtubeComments.json"
 OUTPUT_PATH = BASE_DIR / "data" / "weighted_algorithmic_scores.json"
 
-TRENDING_THRESHOLD   = 0.55
+TRENDING_THRESHOLD   = 0.40   # updated to 0.40
 RECENCY_WINDOW_DAYS  = 30
 ENGAGEMENT_CEILING   = 0.10   # normalize engagement rate against a 10% cap (can be calibrated further during eval down to ~5% depending on dataset spread)
 COMMENT_LIKE_CEILING = 100    # normalize avg comment likes against this cap (also can be calibrated further during eval)
@@ -202,6 +201,9 @@ def score_videos(videos: list[dict], comments_by_video: dict) -> list[dict]:
             },
             "trend_score": round(trend_score, 4),
             "is_trending": trend_score >= TRENDING_THRESHOLD,
+
+            # added scored_at for time series trend tracking
+            "scored_at": datetime.now(timezone.utc).isoformat(),
         })
 
     results.sort(key=lambda x: x["trend_score"], reverse=True)
@@ -214,7 +216,7 @@ def write_output(results: list[dict]) -> None:
     TODO: once the orchestrator is wired up, upsert scores directly into MongoDB in addition to writing to JSON:
         db["videos"].update_one(
             {"video_id": r["video_id"]},
-            {"$set": {"trend_score": r["trend_score"], "is_trending": r["is_trending"]}}
+            {"$set": {"trend_score": r["trend_score"], "is_trending": r["is_trending"], "scored_at": r["scored_at"]}}
         )
     """
     Path(OUTPUT_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -248,7 +250,5 @@ def run_trend_scoring() -> list[dict]:
 
     return results
 
-
 if __name__ == "__main__":
     run_trend_scoring()
-
