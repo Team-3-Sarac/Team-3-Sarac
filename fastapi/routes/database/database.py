@@ -11,7 +11,11 @@ mongo_root_pass = os.getenv("MONGO_ROOT_PASSWORD")
 mongo_name = os.getenv("MONGO_DATABASE")
 mongo_host = os.getenv("MONGO_HOST", "localhost")
 
+<<<<<<< HEAD
+client = MongoClient(f"mongodb://{mongo_root}:{mongo_root_pass}@{mongo_host}:27017/admin")
+=======
 client = AsyncIOMotorClient(f"mongodb://{mongo_root}:{mongo_root_pass}@localhost:27017/admin")
+>>>>>>> origin/main
 
 db = client[mongo_name]
 

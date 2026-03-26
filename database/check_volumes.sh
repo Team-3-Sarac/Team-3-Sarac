@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-VOLUMES=("transcription_mongo_data" "transcription_qdrant_data")
+VOLUMES=("mongo_data" "qdrant_data")
 
 echo "Checking Docker volumes..."
 echo "---------------------------"
