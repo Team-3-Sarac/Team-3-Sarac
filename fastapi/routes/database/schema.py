@@ -1,11 +1,9 @@
-<<<<<<< HEAD
+
 from pydantic import BaseModel,Field
 from typing import Optional
 from datetime import datetime
-=======
-from pydantic import BaseModel
-from typing import Optional
->>>>>>> origin/main
+
+
 
 #The default mongo id (12 char string) object contains a timestamp of creation
 class Video(BaseModel): 
@@ -187,4 +185,4 @@ class ChannelStats(BaseModel):
     total_views: int
     total_likes: int
     total_comments: int
->>>>>>> origin/main
+
