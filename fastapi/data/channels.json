@@ -5,14 +5,15 @@
         "channel_initials": "CS",
         "handle": "@cbssportsgolazo",
         "sub_count": "2860000",
-        "league": null,
+        "league": [],
         "video_count": 94,
-        "sentiment_pct": 0,
+        "sentiment_pct": 0.0,
         "sentiment_dir": "neutral",
         "latest_title": "Mohamed Salah LEAVING Liverpool after this season",
         "latest_views": 22437,
         "active": true,
-        "last_updated": "2026-03-28T23:44:41.469641+00:00"
+        "created_at": "2026-03-29T03:38:07.674107+00:00",
+        "updated_at": "2026-03-29T03:38:07.674120+00:00"
     },
     {
         "channel_id": "UCqZQlzSHbVJrwrn5XvzrzcA",
@@ -20,14 +21,15 @@
         "channel_initials": "NS",
         "handle": "@nbcsports",
         "sub_count": "5340000",
-        "league": null,
-        "video_count": 54,
-        "sentiment_pct": 0,
+        "league": [],
+        "video_count": 66,
+        "sentiment_pct": 0.0,
         "sentiment_dir": "neutral",
-        "latest_title": "Kaori Sakamoto brings fans to tears with short program at figure skating worlds | NBC Sports",
-        "latest_views": 6136,
+        "latest_title": "Piper Gilles and Paul Poirier storm to THIRD STRAIGHT ice dance silver at worlds | NBC Sports",
+        "latest_views": 6271,
         "active": true,
-        "last_updated": "2026-03-28T23:44:41.485713+00:00"
+        "created_at": "2026-03-29T03:38:07.609104+00:00",
+        "updated_at": "2026-03-29T03:38:07.609117+00:00"
     },
     {
         "channel_id": "UC6c1z7bA__85CIWZ_jpCK-Q",
@@ -35,14 +37,15 @@
         "channel_initials": "EF",
         "handle": "@espnfc",
         "sub_count": "4980000",
-        "league": null,
-        "video_count": 62,
-        "sentiment_pct": 0,
+        "league": [],
+        "video_count": 74,
+        "sentiment_pct": 0.0,
         "sentiment_dir": "neutral",
-        "latest_title": "Real Madrid vs. Atletico Madrid EXTENDED HIGHLIGHTS [March 2026] | ESPN FC",
-        "latest_views": 7211,
+        "latest_title": "Camavinga thought it was weird to beat Brazil \ud83d\ude02",
+        "latest_views": 8661,
         "active": true,
-        "last_updated": "2026-03-28T23:44:41.516397+00:00"
+        "created_at": "2026-03-29T03:38:07.578761+00:00",
+        "updated_at": "2026-03-29T03:38:07.578775+00:00"
     },
     {
         "channel_id": "UC0YatYmg5JRYzXJPxIdRd8g",
@@ -50,14 +53,15 @@
         "channel_initials": "BS",
         "handle": "@beinsportsusa",
         "sub_count": "1100000",
-        "league": null,
+        "league": [],
         "video_count": 17,
-        "sentiment_pct": 0,
+        "sentiment_pct": 0.0,
         "sentiment_dir": "neutral",
         "latest_title": "Triay/Brea vs Josemaria/Gonzalez| Premier Padel HIGHLIGHTS | 03/22/2026 | beIN SPORTS USA",
         "latest_views": 10685,
         "active": true,
-        "last_updated": "2026-03-28T23:44:41.485866+00:00"
+        "created_at": "2026-03-29T03:38:07.576545+00:00",
+        "updated_at": "2026-03-29T03:38:07.576566+00:00"
     },
     {
         "channel_id": "UC6UL29enLNe4mqwTfAyeNuw",
@@ -65,13 +69,14 @@
         "channel_initials": "B",
         "handle": "@bundesliga",
         "sub_count": "5580000",
-        "league": null,
-        "video_count": 34,
-        "sentiment_pct": 0,
+        "league": [],
+        "video_count": 36,
+        "sentiment_pct": 0.0,
         "sentiment_dir": "neutral",
-        "latest_title": "Luca Reggiani \ud83c\uddee\ud83c\uddf9 With All His Feels After His Historic Goal \ud83d\ude4c\u2728",
-        "latest_views": 7496,
+        "latest_title": "Mainz Played With a 12th Player\u2049\ufe0f\ud83d\udd4a\ufe0f",
+        "latest_views": 70384,
         "active": true,
-        "last_updated": "2026-03-28T23:44:41.519597+00:00"
+        "created_at": "2026-03-29T03:38:07.650352+00:00",
+        "updated_at": "2026-03-29T03:38:07.650378+00:00"
     }
 ]
