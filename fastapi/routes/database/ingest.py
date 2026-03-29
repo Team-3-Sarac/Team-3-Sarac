@@ -3,79 +3,155 @@ from fastapi import APIRouter, HTTPException, Query
 from bson import ObjectId
 from .database import db
 from .schema import (
-    VideoIn, CommentIn, TranscriptIn, VideoOut, CommentOut, TranscriptSegmentOut,
+    Video, Channel, Comment, Narrative, Claim, Trend, TrendMeta,
+    MatchEvent, TranscriptIn, VideoOut, CommentOut, TranscriptSegmentOut,
     DashboardKPIs, LeagueStats, ChannelStats
 )
 
 router = APIRouter()
 
+# ============== Helpers ==============
+
 def parse_iso(value: str) -> datetime:
+    """Standardize ISO string parsing for incoming date strings."""
     cleaned = value.replace("Z", "+00:00")
     return datetime.fromisoformat(cleaned)
 
 def strip_none(doc: dict) -> dict:
+    """Remove None values from dict before DB insertion."""
     return {k: v for k, v in doc.items() if v is not None}
 
-@router.post("/videos")
-async def ingest_videos(videos: list[VideoIn]):
-    if not videos:
-        raise HTTPException(status_code=400, detail="Empty video list")
-
-    docs = []
-    for v in videos:
-        doc = {
-            "youtube_video_id": v.video_id,
-            "title": v.title,
-            "thumbnail_url": v.thumbnail_url,
-            "channel_id": v.channel_id,
-            "channel_name": v.channel_name,
-            "publish_date": parse_iso(v.publish_date),
-            "league": v.league,
-            "teams": v.teams,
-            "view_count": v.view_count,
-            "like_count": v.like_count,
-            "comment_count": v.comment_count,
-            "duration_seconds": v.duration_seconds,
-            "summary": v.summary,
-            "created_at": parse_iso(v.created_at),
-        }
-        docs.append(strip_none(doc))
-
-    # motor requires await for db operations
-    result = await db.videos.insert_many(docs)
-    return {"inserted": len(result.inserted_ids)}
-
 async def _build_video_id_lookup() -> dict[str, object]:
-    """Map youtube_video_id -> MongoDB ObjectId for all videos in the DB."""
-    # Motor uses 'async for' or 'to_list()' for cursors
+    """Map youtube_video_id -> MongoDB ObjectId for relational linking."""
     cursor = db.videos.find({}, {"youtube_video_id": 1})
     lookup = {}
     async for doc in cursor:
         lookup[doc["youtube_video_id"]] = doc["_id"]
     return lookup
 
+async def _build_channel_id_lookup() -> dict[str, object]:
+    """Map channel_id (YouTube ID) -> MongoDB ObjectId for relational linking."""
+    cursor = db.channels.find({}, {"channel_id": 1})
+    lookup = {}
+    async for doc in cursor:
+        lookup[doc["channel_id"]] = doc["_id"]
+    return lookup
+
+async def _refresh_channel_metadata(channel_ids: list[str]):
+    """Recalculate video_count and latest_video for specific channels."""
+    for c_id in channel_ids:
+        # Find the latest video from this channel in our DB
+        latest_video = await db.videos.find_one(
+            {"channel_id": c_id},
+            sort=[("publish_date", -1)]
+        )
+
+        if latest_video:
+            video_count = await db.videos.count_documents({"channel_id": c_id})
+
+            await db.channels.update_one(
+                {"channel_id": c_id},
+                {"$set": {
+                    "video_count": video_count,
+                    "latest_title": latest_video["title"],
+                    "latest_views": latest_video.get("view_count", 0),
+                    "updated_at": datetime.now(timezone.utc)
+                }}
+            )
+
+
+# ============== Ingestion Endpoints ==============
+
+
+@router.post("/channels")
+async def ingest_channels(channels: list[Channel]):
+    """Ingest channel metadata and ensure timestamps are datetime objects."""
+    if not channels:
+        raise HTTPException(status_code=400, detail="Empty channel list")
+
+    docs = []
+    for c in channels:
+        doc = c.model_dump(by_alias=True, exclude_none=True)
+
+        if isinstance(doc.get("last_updated"), str):
+            doc["updated_at"] = parse_iso(doc["updated_at"])
+        else:
+            doc["updated_at"] = datetime.now(timezone.utc)
+
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+        else:
+            doc["created_at"] = datetime.now(timezone.utc)
+
+        docs.append(doc)
+
+    # Use upsert logic or simple insert depending on preference; here we use insert_many
+    # for bulk ingestion from the pipeline.
+    result = await db.channels.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/videos")
+async def ingest_videos(videos: list[Video]):
+    """Ingest video metadata into the database and link to channels."""
+    if not videos:
+        raise HTTPException(status_code=400, detail="Empty video list")
+
+    channel_lookup = await _build_channel_id_lookup()
+    docs = []
+    
+    for v in videos:
+        doc = v.model_dump(by_alias=True, exclude_none=True)
+        # Resolve channel_id to its MongoDB ObjectId if it exists
+        c_oid = channel_lookup.get(v.channel_id)
+        if c_oid:
+            doc["channel_id"] = c_oid
+
+        # Convert incoming ISO strings to datetime objects
+        if isinstance(doc.get("publish_date"), str):
+            doc["publish_date"] = parse_iso(doc["publish_date"])
+
+        doc["updated_at"] = datetime.now(timezone.utc)
+        # Ensure created_at is a datetime if provided as string
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+
+        docs.append(doc)
+
+    result = await db.videos.insert_many(docs)
+
+    affected_channels = list(set([v.channel_id for v in videos]))
+    await _refresh_channel_metadata(affected_channels)
+
+    return {"inserted": len(result.inserted_ids)}
+
 @router.post("/comments")
-async def ingest_comments(comments: list[CommentIn]):
+async def ingest_comments(comments: list[Comment]):
+    """Ingest user comments and link them to video ObjectIds."""
     if not comments:
         raise HTTPException(status_code=400, detail="Empty comment list")
 
     lookup = await _build_video_id_lookup()
-
     docs = []
     skipped = []
+
     for c in comments:
         oid = lookup.get(c.video_id)
         if oid is None:
-            skipped.append(c.video_id)
-            continue
+            try:
+                oid = ObjectId(c.video_id)
+            except:
+                skipped.append(c.video_id)
+                continue
 
-        doc = {
-            "video_id": oid,
-            "youtube_comment_id": c.youtube_comment_id,
-            "comment_text": c.comment_text,
-            "like_count": c.like_count,
-            "created_at": parse_iso(c.created_at),
-        }
+        doc = c.model_dump(by_alias=True, exclude_none=True)
+        doc["video_id"] = oid
+        
+        # Convert created_at/publish_date strings to datetime
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+        if isinstance(doc.get("publish_date"), str):
+            doc["publish_date"] = parse_iso(doc["publish_date"])
+            
         docs.append(doc)
 
     inserted = 0
@@ -92,6 +168,7 @@ async def ingest_comments(comments: list[CommentIn]):
 
 @router.post("/transcripts")
 async def ingest_transcripts(transcripts: list[TranscriptIn]):
+    """Process and store transcript segments linked to videos."""
     if not transcripts:
         raise HTTPException(status_code=400, detail="Empty transcript list")
 
@@ -100,6 +177,7 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
 
     docs = []
     skipped = []
+
     for t in transcripts:
         oid = lookup.get(t.video_id)
         if oid is None:
@@ -107,15 +185,14 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
             continue
 
         for idx, seg in enumerate(t.transcript):
-            doc = {
+            docs.append({
                 "video_id": oid,
                 "chunk_index": idx,
                 "text": seg.text,
                 "start_time_seconds": int(seg.start),
                 "end_time_seconds": int(seg.start + seg.duration),
                 "created_at": now,
-            }
-            docs.append(doc)
+            })
 
     inserted = 0
     if docs:
@@ -124,10 +201,130 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
 
     resp = {"inserted": inserted}
     if skipped:
-        unique_skipped = list(set(skipped))
-        resp["skipped_video_ids"] = unique_skipped
-        resp["skipped_count"] = len(skipped)
+        resp["skipped_video_ids"] = list(set(skipped))
     return resp
+
+@router.post("/narratives")
+async def ingest_narratives(narratives: list[Narrative]):
+    """Ingest high-level narratives/storylines."""
+    if not narratives:
+        raise HTTPException(status_code=400, detail="Empty narrative list")
+    
+    docs = []
+    for n in narratives:
+        doc = n.model_dump(by_alias=True, exclude_none=True)
+        doc["updated_at"] = datetime.now(timezone.utc)
+        # Convert created_at if present as string
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+        docs.append(doc)
+        
+    result = await db.narratives.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/claims")
+async def ingest_claims(claims: list[Claim]):
+    """Store extracted claims with confidence levels and sentiment."""
+    if not claims:
+        raise HTTPException(status_code=400, detail="Empty claims list")
+    
+    docs = []
+    for c in claims:
+        doc = c.model_dump(by_alias=True, exclude_none=True)
+        # Ensure chunk_ids are converted to ObjectIds for the database
+        if doc.get("chunk_ids"):
+            doc["chunk_ids"] = [ObjectId(cid) if isinstance(cid, str) else cid for cid in doc["chunk_ids"]]
+        
+        # Convert timestamp if present as string
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+            
+        docs.append(doc)
+        
+    result = await db.claims.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/trends")
+async def ingest_trends(trends: list[Trend]):
+    """Ingest trend summaries."""
+    if not trends:
+        raise HTTPException(status_code=400, detail="Empty trend list")
+    
+    docs = []
+    for t in trends:
+        doc = t.model_dump(by_alias=True, exclude_none=True)
+        if isinstance(doc.get("last_updated"), str):
+            doc["last_updated"] = parse_iso(doc["last_updated"])
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+        docs.append(doc)
+        
+    result = await db.trends.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/trends/meta")
+async def ingest_trend_meta(meta_records: list[TrendMeta]):
+    """Ingest snapshot measurements for trend tracking."""
+    if not meta_records:
+        raise HTTPException(status_code=400, detail="Empty meta list")
+    
+    docs = []
+    for m in meta_records:
+        doc = m.model_dump(by_alias=True)
+        # Handle composite _id timestamp
+        if isinstance(doc["_id"].get("ts"), str):
+            doc["_id"]["ts"] = parse_iso(doc["_id"]["ts"])
+        docs.append(doc)
+        
+    result = await db.trend_meta.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/events")
+async def ingest_match_events(events: list[MatchEvent]):
+    """Ingest specific match incidents (goals, cards, etc)."""
+    if not events:
+        raise HTTPException(status_code=400, detail="Empty event list")
+        
+    docs = []
+    for e in events:
+        doc = e.model_dump(by_alias=True, exclude_none=True)
+        # Convert created_at string to datetime
+        if isinstance(doc.get("created_at"), str):
+            doc["created_at"] = parse_iso(doc["created_at"])
+        docs.append(doc)
+
+    result = await db.match_events.insert_many(docs)
+    return {"inserted": len(result.inserted_ids)}
+
+@router.post("/dashboard/kpis/sync")
+async def ingest_dashboard_kpis(kpis: DashboardKPIs):
+    """Store or update global dashboard KPIs."""
+    doc = kpis.model_dump()
+    doc["updated_at"] = datetime.now(timezone.utc)
+    await db.dashboard_stats.update_one({"type": "global_kpis"}, {"$set": doc}, upsert=True)
+    return {"status": "success"}
+
+@router.post("/dashboard/leagues/sync")
+async def ingest_league_stats(stats: list[LeagueStats]):
+    """Sync pre-calculated league statistics."""
+    if not stats:
+        raise HTTPException(status_code=400, detail="Empty stats list")
+    
+    docs = [s.model_dump() for s in stats]
+    await db.league_stats.delete_many({}) # Refresh current stats
+    await db.league_stats.insert_many(docs)
+    return {"inserted": len(docs)}
+
+@router.post("/dashboard/channels/sync")
+async def ingest_channel_stats(stats: list[ChannelStats]):
+    """Sync pre-calculated channel statistics."""
+    if not stats:
+        raise HTTPException(status_code=400, detail="Empty stats list")
+    
+    docs = [s.model_dump() for s in stats]
+    await db.channel_performance.delete_many({}) # Refresh current stats
+    await db.channel_performance.insert_many(docs)
+    return {"inserted": len(docs)}
 
 
 # ============== GET Endpoints ==============
@@ -329,7 +526,7 @@ def get_sentiment_history():
     from datetime import datetime, timedelta
     
     # Get comments with sentiment data from last 4 weeks
-    four_weeks_ago = datetime.now() - timedelta(weeks=4)
+    four_weeks_ago = datetime.now(timezone.utc) - timedelta(weeks=4)
     
     # Aggregate sentiment by week
     pipeline = [
@@ -369,9 +566,8 @@ def get_sentiment_history():
         results = []
         for i in range(4, 0, -1):
             week_date = now - timedelta(weeks=i)
-            # Simulate sentiment based on engagement patterns
-            positive_ratio = 0.55 + (0.1 * (i % 3 - 1))  # Varies between 0.45-0.65
-            negative_ratio = 0.15 + (0.05 * (i % 2))  # Varies between 0.15-0.20
+            positive_ratio = 0.55 + (0.1 * (i % 3 - 1))
+            negative_ratio = 0.15 + (0.05 * (i % 2))
             results.append({
                 "_id": {"week": week_date.isocalendar()[1], "year": week_date.year},
                 "avg_positive": positive_ratio,

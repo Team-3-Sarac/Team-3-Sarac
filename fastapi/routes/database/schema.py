@@ -1,68 +1,138 @@
+from pydantic import BaseModel, Field, GetCoreSchemaHandler
+from pydantic_core import core_schema
+from typing import Optional, List, Any
+from datetime import datetime, timezone
+from bson import ObjectId
 
-from pydantic import BaseModel,Field
-from typing import Optional
-from datetime import datetime
+# ============== Custom Type Definitions ==============
+
+class PyObjectId(str):
+    """
+    Wraps MongoDB's ObjectId as a plain string for Pydantic v2.
+    Accepts an ObjectId instance or any 24-char hex string on input;
+    always serialises to str so JSON responses work without extra config.
+    """
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(cls.validate)
+
+    @classmethod
+    def validate(cls, v: Any) -> "PyObjectId":
+        if isinstance(v, ObjectId):
+            return cls(str(v))
+        if isinstance(v, str) and ObjectId.is_valid(v):
+            return cls(v)
+        raise ValueError(f"Invalid ObjectId: {v!r}")
+
+    def __repr__(self) -> str:
+        return f"PyObjectId({str(self)!r})"
 
 
+class MeasurementID(BaseModel):
+    """
+    Composite _id for TrendMeta documents: identifies which trend slug
+    this measurement belongs to and when the snapshot was taken.
+    """
+    slug: str       # matches Trend._id (the url-friendly slug)
+    ts: datetime    # timestamp of this snapshot
 
-#The default mongo id (12 char string) object contains a timestamp of creation
+
+# ============== Base Models ==============
+
 class Video(BaseModel): 
-    id: Optional[PyObjectId] = Field(alias="_id",default=None)#Use for the id mongo creates
-    video_id: str = Field(...,unique=True)#secondary unique id we'll collect
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    youtube_video_id: str = Field(..., unique=True)
     title: str
-    thumbnail_url: str | None = None
+    thumbnail_url: Optional[str] = None
     channel_id: str
-    publish_date: str
-    league: list[str] | None = None
-    teams: list[str] | None = None
+    channel_name: str
+    publish_date: datetime 
+    league: List[str] = [] # Updated to hold more than 1 string
+    teams: List[str] = []
     view_count: int
     like_count: int
     comment_count: int
     duration_seconds: int
-    summary: str | None = None
+    summary: Optional[str] = None
+    sentiment_pct: float = 0.0 # Red text requirement: sentiment for trending matches
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Channel(BaseModel):
-    channel_id: str
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    channel_id: Optional[PyObjectId] = Field(alias="_id", default=None)
     channel_name: str
-    subscriber_count: int
+    channel_initials: str # Derived from channel_name
+    handle: str            # Red Text: YouTube @handle
+    sub_count: int         # Red Text: Rounded int from API
+    league: List[str] = []
+    video_count: int       # Derived: Number of videos in DB
+    sentiment_pct: float   # Red Text: Average sentiment
+    sentiment_dir: str     # Derived from sentiment_pct
+    latest_title: str      # Derived: Title of most recent video
+    latest_views: int      # Derived: Views of most recent video
+    active: bool = True    # Red Text: Tracking toggle
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Comment(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id",default=None)
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
     video_id: str
     youtube_comment_id: str
+    author: str            # Restored to match CommentOut/Old Script
     comment_text: str
     like_count: int
-    embedding_id:str 
+    embedding_id: str
+    publish_date: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Narrative(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id",default=None)
-    narrative_label:str
-    league:List(str)
-    
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    narrative_label: str
+    league: List[str] # Updated to hold more than 1 string
+    description: Optional[str] = None
+    claim_ids: List[PyObjectId] = []
+    embedding_id: str      # Restored from old schema script
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 class Claim(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id",default=None)
-    video_id: Optional[PyObjectId] = Field(alias="video_id",default=None)
-    claim_text:str
-    embedding_id:str
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    video_id: Optional[PyObjectId] = Field(alias="video_id", default=None)
+    chunk_ids: List[PyObjectId]
+    source_type: str
+    claim_text: str
+    quote: str
+    confidence: float      # Red Text: Extraction confidence
+    sentiment: str         # Red Text: e.g. "Positive"
+    mentions: int = 1      # Derived
+    leagues: List[str] = [] # Red Text: Store as array
+    embedding_id: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Trend(BaseModel):
     id: str = Field(alias="_id") # slug of display name
-    #slug is a url friendly version of string EX) real-madrid-lose-to-almeria
-    display_name: str #EX) Real Madrid lose to Almeria 
-    narrative_id: Optional[str] = None 
-    leagues: List[str]
-    status: str 
+    display_name: str
+    narrative_id: Optional[str] = None
+    league: List[str] # Updated to hold more than 1 string
+    mention_count: int = 0
+    status: str
     current_score: float = 0.0
+    change_pct: float = 0.0
+    trending_direction: str
     last_updated: datetime
+    # Trend category counts for dashboard graphs
+    Transfers: int = 0
+    Injuries: int = 0
+    Tactics: int = 0
+    Controversy: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-
-    
-
-#Helper collection/model to model time series & relevance of trends 
 class TrendMeta(BaseModel):
-    # ID is the Composite Object: {slug: str, ts: datetime}
     id: MeasurementID = Field(alias="_id") 
     value: int
     sentiment: float
@@ -77,6 +147,18 @@ EX) At 4 PM, it will count # of mentions surrounding a topic and generate a sent
     - sentiment represents a float scoring of anger/negative (-1) to happy (1)
 '''
     
+class MatchEvent(BaseModel):
+    """
+    Represents specific match incidents
+    """
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    video_id: PyObjectId
+    event_type: str
+    team: str
+    player: str
+    match_minute: int
+    description: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TranscriptSegment(BaseModel):
     text: str
@@ -89,8 +171,6 @@ class TranscriptIn(BaseModel):
     transcript: list[TranscriptSegment]
 
 
-<<<<<<< HEAD
-=======
 # ============== Response Schemas ==============
 
 
