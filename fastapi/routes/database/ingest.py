@@ -210,13 +210,13 @@ async def ingest_narratives(narratives: list[Narrative]):
     Ingest high-level narratives.
     Uses upsert logic to ensure 'created_at' is preserved and
     'updated_at' is refreshed.
+    increments mentions for referenced claims
     """
     if not narratives:
         raise HTTPException(status_code=400, detail="Empty narrative list")
 
     processed_count = 0
     for n in narratives:
-        # Convert Pydantic model to dict
         doc = n.model_dump(by_alias=True, exclude_none=True)
 
         # Standardize dates
@@ -225,12 +225,10 @@ async def ingest_narratives(narratives: list[Narrative]):
             if isinstance(doc.get(field), str):
                 doc[field] = parse_iso(doc[field])
 
-        # Pull out created_at to use specifically for the first-time insert
-        # If the pipeline didn't send one, use current_time
         initial_date = doc.pop("created_at", current_time)
         doc["updated_at"] = current_time
 
-        # Match by narrative_label
+        # 1. Update the Narrative (Upsert logic)
         await db.narratives.update_one(
             {"narrative_label": doc["narrative_label"]},
             {
@@ -239,6 +237,16 @@ async def ingest_narratives(narratives: list[Narrative]):
             },
             upsert=True
         )
+
+        # 2. Increment mentions in the Claims collection
+        # We convert string IDs from the payload into BSON ObjectIds
+        claim_ids = [ObjectId(cid) for cid in doc.get("claim_ids", [])]
+        if claim_ids:
+            await db.claims.update_many(
+                {"_id": {"$in": claim_ids}},
+                {"$inc": {"mentions": 1}}
+            )
+
         processed_count += 1
 
     return {"processed": processed_count}
