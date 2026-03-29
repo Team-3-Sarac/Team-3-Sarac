@@ -1,5 +1,6 @@
 import Pill from "../components/pill";
-import { Flame, TrendingUp, TrendingDown } from "lucide-react";
+import Badge from "../components/badge";
+import { Flame, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 export default function TopicRow({
   hot,
@@ -16,7 +17,7 @@ export default function TopicRow({
   changeDir: "up" | "down" | "flat";
   leagues: string[];
 }) {
-  const changeCls =
+  const changeColor =
     changeDir === "up"
       ? "text-emerald-400"
       : changeDir === "down"
@@ -24,27 +25,34 @@ export default function TopicRow({
       : "text-neutral-500";
 
   const ChangeIcon =
-    changeDir === "up" ? TrendingUp : changeDir === "down" ? TrendingDown : null;
+    changeDir === "up" ? TrendingUp : changeDir === "down" ? TrendingDown : Minus;
 
   return (
-    <div className="grid grid-cols-12 items-center gap-4 px-5 py-4">
+    <div className="grid grid-cols-12 gap-4 px-6 py-4 transition-colors hover:bg-[#161616]">
+      {/* Topic */}
       <div className="col-span-6 flex items-center gap-3 min-w-0">
-        {hot ? <Flame className="h-4 w-4 text-amber-400" /> : <span className="h-4 w-4" />}
-        <div className="truncate text-sm font-medium">{topic}</div>
+        {hot && (
+          <Flame className="h-3.5 w-3.5 shrink-0 text-orange-400" />
+        )}
+        {!hot && <span className="h-3.5 w-3.5 shrink-0" />}
+        <span className="truncate text-[13px] font-medium text-white/85">{topic}</span>
       </div>
 
-      <div className="col-span-2 text-right text-sm font-semibold">{mentions}</div>
-
-      <div className={`col-span-2 text-right text-sm ${changeCls}`}>
-        <span className="inline-flex items-center justify-end gap-1">
-          {ChangeIcon ? <ChangeIcon className="h-4 w-4" /> : null}
-          {change}
-        </span>
+      {/* Mentions */}
+      <div className="col-span-2 flex items-center justify-end">
+        <span className="tabular-nums text-[13px] text-neutral-400">{mentions}</span>
       </div>
 
-      <div className="col-span-2 flex justify-end gap-2">
-        {leagues.map((l) => (
-          <Pill key={l}>{l}</Pill>
+      {/* Change */}
+      <div className={`col-span-2 flex items-center justify-end gap-1.5 ${changeColor}`}>
+        <ChangeIcon className="h-3 w-3 shrink-0" />
+        <span className="tabular-nums text-[13px]">{change}</span>
+      </div>
+
+      {/* Leagues */}
+      <div className="col-span-2 flex items-center justify-end gap-1 flex-wrap">
+        {leagues.slice(0, 2).map((l) => (
+          <Badge key={l} tone="neutral">{l}</Badge>
         ))}
       </div>
     </div>

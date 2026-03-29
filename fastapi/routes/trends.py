@@ -43,14 +43,17 @@ def _doc_to_claim_out(doc: dict) -> ClaimOut:
     return ClaimOut(
         id=_serialize_object_id(doc["_id"]),
         narrative_id=str(doc.get("narrative_id", "")),
-        text=doc.get("text", ""),
+        text=doc.get("text") or doc.get("claim_text", ""),
         video_id=str(doc.get("video_id", "")),
         created_at=doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
+        mention_count=doc.get("mention_count"),
+        confidence=doc.get("confidence"),
+        sentiment=doc.get("sentiment"),
     )
 
 
 @router.get("")
-def get_trends(
+async def get_trends(
     time_window: str = Query(default="1d", description="Time window: 1d, 7d, etc."),
 ):
     """Get list of trends, optionally filtered by time window."""
@@ -58,8 +61,8 @@ def get_trends(
     if time_window:
         query["time_window"] = time_window
 
-    cursor = db.trends.find(query)
-    trends = [_doc_to_trend_out(doc) for doc in cursor]
+    docs = await db.trends.find(query).to_list(None)
+    trends = [_doc_to_trend_out(doc) for doc in docs]
     return {"trends": trends, "count": len(trends)}
 
 
@@ -76,15 +79,15 @@ def calculate_trends_endpoint(
 
 
 @router.get("/narratives")
-def get_narratives():
+async def get_narratives():
     """Get list of all narratives."""
-    cursor = db.narratives.find()
-    narratives = [_doc_to_narrative_out(doc) for doc in cursor]
+    docs = await db.narratives.find().to_list(None)
+    narratives = [_doc_to_narrative_out(doc) for doc in docs]
     return {"narratives": narratives, "count": len(narratives)}
 
 
 @router.get("/claims")
-def get_claims(
+async def get_claims(
     narrative_id: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
 ):
@@ -93,6 +96,6 @@ def get_claims(
     if narrative_id:
         query["narrative_id"] = narrative_id
 
-    cursor = db.claims.find(query).limit(limit)
-    claims = [_doc_to_claim_out(doc) for doc in cursor]
+    docs = await db.claims.find(query).limit(limit).to_list(limit)
+    claims = [_doc_to_claim_out(doc) for doc in docs]
     return {"claims": claims, "count": len(claims)}

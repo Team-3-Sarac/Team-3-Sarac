@@ -361,15 +361,20 @@ async def ingest_channel_stats(stats: list[ChannelStats]):
 
 def _doc_to_video_out(doc: dict) -> VideoOut:
     """Convert MongoDB video document to VideoOut schema."""
+    league_raw = doc.get("league")
+    if isinstance(league_raw, list):
+        league = league_raw[0] if league_raw else None
+    else:
+        league = league_raw
     return VideoOut(
         id=str(doc["_id"]),
         video_id=doc["youtube_video_id"],
         title=doc["title"],
         thumbnail_url=doc.get("thumbnail_url"),
         channel_id=doc["channel_id"],
-        channel_name=doc["channel_name"],
+        channel_name=doc.get("channel_name", ""),
         publish_date=doc["publish_date"].isoformat() if isinstance(doc["publish_date"], datetime) else doc["publish_date"],
-        league=doc.get("league"),
+        league=league,
         teams=doc.get("teams"),
         view_count=doc.get("view_count", 0),
         like_count=doc.get("like_count", 0),
@@ -394,7 +399,7 @@ def _doc_to_comment_out(doc: dict) -> CommentOut:
 
 
 @router.get("/videos")
-def get_videos(
+async def get_videos(
     limit: int = Query(default=50, ge=1, le=500),
     league: str | None = None,
     channel_id: str | None = None,
@@ -406,56 +411,59 @@ def get_videos(
     if channel_id:
         query["channel_id"] = channel_id
 
-    cursor = db.videos.find(query).limit(limit)
-    videos = [_doc_to_video_out(doc) for doc in cursor]
+    cursor = db.videos.find(query).sort("created_at", -1).limit(limit)
+    videos = []
+    async for doc in cursor:
+        videos.append(_doc_to_video_out(doc))
     return {"videos": videos, "count": len(videos)}
 
 
 @router.get("/videos/{video_id}")
-def get_video(video_id: str):
+async def get_video(video_id: str):
     """Get a single video by youtube_video_id."""
-    doc = db.videos.find_one({"youtube_video_id": video_id})
+    doc = await db.videos.find_one({"youtube_video_id": video_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Video not found")
     return _doc_to_video_out(doc)
 
 
 @router.get("/comments")
-def get_comments(
+async def get_comments(
     video_id: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
 ):
     """Get list of comments, optionally filtered by video_id."""
     query = {}
     if video_id:
-        video_doc = db.videos.find_one({"youtube_video_id": video_id})
+        video_doc = await db.videos.find_one({"youtube_video_id": video_id})
         if not video_doc:
             raise HTTPException(status_code=404, detail="Video not found")
         query["video_id"] = video_doc["_id"]
 
     cursor = db.comments.find(query).limit(limit)
-    comments = [_doc_to_comment_out(doc) for doc in cursor]
+    comments = []
+    async for doc in cursor:
+        comments.append(_doc_to_comment_out(doc))
     return {"comments": comments, "count": len(comments)}
 
 
 @router.get("/transcripts")
-def get_transcripts(
-    video_id: str,
+async def get_transcripts(
+    video_id: str
 ):
     """Get transcript for a specific video."""
-    video_doc = db.videos.find_one({"youtube_video_id": video_id})
+    video_doc = await db.videos.find_one({"youtube_video_id": video_id})
     if not video_doc:
         raise HTTPException(status_code=404, detail="Video not found")
 
     cursor = db.transcript_chunks.find({"video_id": video_doc["_id"]}).sort("chunk_index", 1)
-    segments = [
-        TranscriptSegmentOut(
+    segments = []
+    async for doc in cursor:
+        segments.append(TranscriptSegmentOut(
             text=doc["text"],
             start=doc["start_time_seconds"],
             duration=doc["end_time_seconds"] - doc["start_time_seconds"],
-        )
-        for doc in cursor
-    ]
+        ))
     return {"video_id": video_id, "transcript": segments}
 
 
@@ -463,27 +471,27 @@ def get_transcripts(
 
 
 @router.get("/dashboard/kpis")
-def get_dashboard_kpis():
+async def get_dashboard_kpis():
     """Get aggregated KPI data for the dashboard."""
     # Videos analyzed (total count)
-    videos_analyzed = db.videos.count_documents({})
+    videos_analyzed = await db.videos.count_documents({})
 
     # Trending topics (count from trends collection)
-    trending_topics = db.trends.count_documents({})
+    trending_topics = await db.trends.count_documents({})
 
     # Avg sentiment - stubbed for now (as per user request)
-    avg_sentiment = 72.0
+    avg_sentiment = 0
 
     # Channels tracked (distinct channel_id from videos)
-    channels_tracked = len(db.videos.distinct("channel_id"))
+    channels_tracked = len(await db.videos.distinct("channel_id"))
 
     # Videos this week
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    videos_this_week = db.videos.count_documents({"created_at": {"$gte": week_ago}})
-
+    videos_this_week = await db.videos.count_documents({"created_at": {"$gte": week_ago}})
+    
     # Topics since yesterday
     yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    topics_since_yesterday = db.trends.count_documents({"created_at": {"$gte": yesterday}})
+    topics_since_yesterday = await db.trends.count_documents({"created_at": {"$gte": yesterday}})
 
     return {
         "videos_analyzed": videos_analyzed,
@@ -496,17 +504,17 @@ def get_dashboard_kpis():
 
 
 @router.get("/dashboard/leagues")
-def get_league_stats():
+async def get_league_stats():
     """Get content volume by league."""
     # Aggregate videos by league
     pipeline = [
+        {"$unwind": {"path": "$league", "preserveNullAndEmptyArrays": True}},
         {"$group": {"_id": "$league", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    results = list(db.videos.aggregate(pipeline))
 
     league_stats = []
-    for doc in results:
+    async for doc in db.videos.aggregate(pipeline):
         league = doc["_id"] if doc["_id"] else "Unknown"
         count = doc["count"]
         # Status logic: mark as "Trending" if count > 100 (arbitrary threshold for now)
@@ -517,7 +525,7 @@ def get_league_stats():
 
 
 @router.get("/channels")
-def get_channels():
+async def get_channels():
     """Get list of channels with aggregated stats."""
     # Aggregate by channel
     pipeline = [
@@ -533,10 +541,9 @@ def get_channels():
         },
         {"$sort": {"video_count": -1}},
     ]
-    results = list(db.videos.aggregate(pipeline))
 
     channels = []
-    for doc in results:
+    async for doc in db.videos.aggregate(pipeline):
         channels.append({
             "channel_id": doc["_id"],
             "channel_name": doc["channel_name"],
@@ -550,13 +557,11 @@ def get_channels():
 
 
 @router.get("/dashboard/sentiment-history")
-def get_sentiment_history():
+async def get_sentiment_history():
     """Get weekly sentiment history for charts."""
-    from datetime import datetime, timedelta
-    
     # Get comments with sentiment data from last 4 weeks
     four_weeks_ago = datetime.now(timezone.utc) - timedelta(weeks=4)
-    
+
     # Aggregate sentiment by week
     pipeline = [
         {"$match": {"created_at": {"$gte": four_weeks_ago}}},
@@ -564,19 +569,19 @@ def get_sentiment_history():
             "$group": {
                 "_id": {
                     "week": {"$week": "$created_at"},
-                    "year": {"$year": "$created_at"}
+                    "year": {"$year": "$created_at"},
                 },
                 "avg_positive": {"$avg": {"$cond": [{"$eq": ["$sentiment", "positive"]}, 1, 0]}},
                 "avg_negative": {"$avg": {"$cond": [{"$eq": ["$sentiment", "negative"]}, 1, 0]}},
-                "comment_count": {"$sum": 1}
+                "comment_count": {"$sum": 1},
             }
         },
-        {"$sort": {"_id.year": 1, "_id.week": 1}}
+        {"$sort": {"_id.year": 1, "_id.week": 1}},
     ]
-    
-    results = list(db.comments.aggregate(pipeline))
-    
-    # If no sentiment data, use video-based estimation
+
+    results = await db.comments.aggregate(pipeline).to_list(None)
+
+        # If no sentiment data, use video-based estimation
     if not results:
         # Fallback: estimate from comment likes and video metrics
         video_pipeline = [
@@ -608,52 +613,38 @@ def get_sentiment_history():
     for doc in results:
         weekly_data.append({
             "week": f"Week {doc['_id']['week']}",
-            "positive": round(doc['avg_positive'] * 100, 1),
-            "negative": round(doc['avg_negative'] * 100, 1)
+            "positive": round(doc["avg_positive"] * 100, 1),
+            "negative": round(doc["avg_negative"] * 100, 1),
         })
-    
     return {"weeks": weekly_data}
 
 
 @router.get("/trends/history")
-def get_trends_history():
+async def get_trends_history():
     """Get historical trend data for line chart."""
-    # For now, return mock data based on current trends
-    # In production, this would query historical trend snapshots
-    
-    trends_cursor = db.trends.find()
-    trends = list(trends_cursor)
-    
-    # Generate 6 weeks of mock historical data
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     weeks_data = []
-    
     categories = ["Transfers", "Injuries", "Tactics", "Controversy"]
-    
+
     for i in range(6, 0, -1):
-        week_date = now - timedelta(weeks=i)
         week_entry = {"week": f"W{i}"}
-        
-        # Generate values that trend upward/downward realistically
         for j, cat in enumerate(categories):
             base_value = 20 + (j * 10)
             variation = (6 - i) * 3 + (hash(cat + str(i)) % 15)
             week_entry[cat.lower()] = base_value + variation
-        
         weeks_data.append(week_entry)
-    
+
     return {"history": weeks_data, "categories": categories}
 
 
 @router.get("/channels/{channel_id}/latest-video")
-def get_channel_latest_video(channel_id: str):
+async def get_channel_latest_video(channel_id: str):
     """Get the latest video for a specific channel."""
-    latest_video = db.videos.find_one(
+    latest_video = await db.videos.find_one(
         {"channel_id": channel_id},
-        sort=[("publish_date", -1)]
+        sort=[("publish_date", -1)],
     )
-    
+
     if not latest_video:
         raise HTTPException(status_code=404, detail="Channel not found")
     
@@ -661,24 +652,26 @@ def get_channel_latest_video(channel_id: str):
         "video_id": latest_video["youtube_video_id"],
         "title": latest_video["title"],
         "view_count": latest_video.get("view_count", 0),
-        "publish_date": latest_video["publish_date"].isoformat() if isinstance(latest_video["publish_date"], datetime) else latest_video["publish_date"]
+        "publish_date": latest_video["publish_date"].isoformat() if isinstance(latest_video["publish_date"], datetime) else latest_video["publish_date"],
     }
 
 
 @router.get("/events")
-def get_events(limit: int = Query(default=10, ge=1, le=100)):
+async def get_events(limit: int = Query(default=10, ge=1, le=100)):
     """Get list of match events."""
-    cursor = db.match_events.find().sort("created_at", -1).limit(limit)
-    events = []
-    for doc in cursor:
-        events.append({
-            "id": str(doc["_id"]),
-            "video_id": str(doc.get("video_id", "")),
-            "event_type": doc.get("event_type", ""),
-            "team": doc.get("team"),
-            "player": doc.get("player"),
-            "match_minute": doc.get("match_minute"),
-            "description": doc.get("description", ""),
-            "created_at": doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
-        })
-    return {"events": events, "count": len(events)}
+    try:
+        events = []
+        async for doc in db.match_events.find().sort("created_at", -1).limit(limit):
+            events.append({
+                "id": str(doc["_id"]),
+                "video_id": str(doc.get("video_id", "")),
+                "event_type": doc.get("event_type", ""),
+                "team": doc.get("team"),
+                "player": doc.get("player"),
+                "match_minute": doc.get("match_minute"),
+                "description": doc.get("description", ""),
+                "created_at": doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
+            })
+        return {"events": events, "count": len(events)}
+    except Exception:
+        return {"events": [], "count": 0}

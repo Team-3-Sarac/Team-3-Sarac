@@ -243,6 +243,9 @@ class ClaimOut(BaseModel):
     text: str
     video_id: str
     created_at: str
+    mention_count: Optional[int] = None
+    confidence: Optional[float] = None
+    sentiment: Optional[str] = None
 
 
 # ============== Dashboard Aggregated Schemas ==============
@@ -270,4 +273,3 @@ class ChannelStats(BaseModel):
     total_views: int
     total_likes: int
     total_comments: int
-

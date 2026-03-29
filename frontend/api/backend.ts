@@ -64,7 +64,10 @@ export async function getVideos(params?: { limit?: number; league?: string; chan
 
   const res = await fetch(`${API_BASE}/ingest/videos?${searchParams.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch videos");
-  return res.json();
+  const data = await res.json();
+  return {
+    videos: data.videos || data.data || [],
+  };
 }
 
 export async function getVideoById(videoId: string) {
@@ -102,7 +105,9 @@ export async function getTrends(time_window?: string) {
 
 export async function calculateTrends(time_window_days?: number) {
   const searchParams = new URLSearchParams();
-  if (time_window_days) searchParams.set("time_window_days", time_window_days.toString());
+  if (time_window_days !== undefined) {
+    searchParams.set("time_window_days", String(Math.round(time_window_days)));
+  }
 
   const res = await fetch(`${API_BASE}/trends/calculate?${searchParams.toString()}`, {
     method: "POST",
@@ -132,13 +137,28 @@ export async function getClaims(params?: { narrative_id?: string; limit?: number
 export async function getDashboardKPIs() {
   const res = await fetch(`${API_BASE}/ingest/dashboard/kpis`);
   if (!res.ok) throw new Error("Failed to fetch dashboard KPIs");
-  return res.json();
+
+  const data = await res.json();
+
+  return {
+    videos_analyzed: data.videos_analyzed ?? data.total_videos ?? 0,
+    trending_topics: data.trending_topics ?? data.total_trends ?? 0,
+    avg_sentiment: data.avg_sentiment ?? 0,
+    channels_tracked: data.channels_tracked ?? data.total_channels ?? 0,
+    videos_this_week: data.videos_this_week ?? 0,
+    topics_since_yesterday: data.topics_since_yesterday ?? 0,
+  };
 }
 
 export async function getLeagueStats() {
   const res = await fetch(`${API_BASE}/ingest/dashboard/leagues`);
   if (!res.ok) throw new Error("Failed to fetch league stats");
-  return res.json();
+
+  const data = await res.json();
+
+  return {
+    leagues: data.leagues || data.data || [],
+  };
 }
 
 export async function getChannels() {
@@ -169,7 +189,13 @@ export async function getEvents(limit?: number) {
   const searchParams = new URLSearchParams();
   if (limit) searchParams.set("limit", limit.toString());
 
-  const res = await fetch(`${API_BASE}/ingest/events?${searchParams.toString()}`);
-  if (!res.ok) throw new Error("Failed to fetch events");
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}/ingest/events?${searchParams.toString()}`);
+    if (!res.ok) throw new Error("Failed to fetch events");
+
+    const data = await res.json();
+    return { events: data.events || data.data || [] };
+  } catch {
+    return { events: [] };
+  }
 }

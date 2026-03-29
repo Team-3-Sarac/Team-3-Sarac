@@ -8,6 +8,9 @@ type Claim = {
   text: string;
   video_id: string;
   created_at: string;
+  mention_count?: number;
+  confidence?: number;
+  sentiment?: string;
 };
 
 type Narrative = {
@@ -22,6 +25,7 @@ export default function ClaimsPanel() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [narratives, setNarratives] = useState<Narrative[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -34,6 +38,7 @@ export default function ClaimsPanel() {
         setNarratives(narrativesRes.narratives || []);
       } catch (err) {
         console.error("Failed to fetch claims:", err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -41,70 +46,85 @@ export default function ClaimsPanel() {
     fetchData();
   }, []);
 
-  const getNarrativeTitle = (narrativeId: string): string => {
-    const narrative = narratives.find((n) => n.id === narrativeId);
-    return narrative?.title || "General Claim";
-  };
-
   const getClaimLeague = (narrativeId: string): string | null => {
     const narrative = narratives.find((n) => n.id === narrativeId);
     return narrative?.league || null;
   };
 
-  const getMockMetrics = (index: number) => ({
-    confidence: 75 + (index % 20),
-    sentiment: ["positive", "neutral", "negative"][index % 3] as "positive" | "neutral" | "negative",
-    mentions: 50 + (index * 12),
-  });
-
-  if (loading) {
-    return (
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-        <div className="flex h-32 items-center justify-center text-neutral-500">
-          Loading claims...
-        </div>
-      </div>
-    );
-  }
-
-  const displayClaims = claims.length > 0 ? claims : getFallbackClaims();
+  const getSentimentTone = (sentiment: string | undefined) => {
+    if (sentiment === "positive") return "green";
+    if (sentiment === "negative") return "red";
+    return "yellow";
+  };
 
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-      <div className="border-b border-neutral-800 px-5 py-4">
-        <div className="text-sm font-semibold">Emerging Claims</div>
+    <div className="rounded-xl border border-white/[0.07] bg-[#0f0f0f]">
+      <div className="border-b border-white/6 px-5 py-5">
+        <div
+          className="text-sm font-semibold"
+          style={{ fontFamily: "'DM Serif Display', Georgia, serif" }}
+        >
+          Emerging Claims
+        </div>
         <div className="text-xs text-neutral-400">
           Repeated claims and narratives extracted from soccer video coverage
         </div>
       </div>
 
-      <div className="divide-y divide-neutral-800">
-        {displayClaims.slice(0, 5).map((item, index) => {
-          const metrics = getMockMetrics(index);
-          const leagues = getClaimLeague(item.narrative_id);
-          
-          return (
-            <div key={item.id || index} className="px-5 py-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white">
-                    {item.text || getFallbackClaims()[index]?.text || "Claim data unavailable"}
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <ClaimBadge label={`${metrics.mentions} mentions`} tone="neutral" />
-                    <ClaimBadge label={`${metrics.confidence}% confidence`} tone="blue" />
-                    <ClaimBadge
-                      label={metrics.sentiment}
-                      tone={metrics.sentiment === "positive" ? "green" : metrics.sentiment === "negative" ? "red" : "yellow"}
-                    />
-                    {leagues && <ClaimBadge key={leagues} label={leagues} tone="neutral" />}
+      <div className="divide-y divide-white/4">
+        {loading ? (
+          <div className="divide-y divide-white/4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="px-5 py-4">
+                <div className="animate-pulse space-y-2">
+                  <div className="h-3.5 w-3/4 rounded bg-white/4" />
+                  <div className="h-3.5 w-1/2 rounded bg-white/4" />
+                  <div className="mt-3 flex gap-2">
+                    <div className="h-5 w-20 rounded-md bg-white/4" />
+                    <div className="h-5 w-24 rounded-md bg-white/4" />
+                    <div className="h-5 w-16 rounded-md bg-white/4" />
                   </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        ) : error ? (
+          <div className="flex h-32 items-center justify-center text-sm text-neutral-600">
+            Failed to load claims
+          </div>
+        ) : claims.length === 0 ? (
+          <div className="flex h-32 items-center justify-center text-sm text-neutral-500">
+            No claims available
+          </div>
+        ) : (
+          claims.slice(0, 5).map((item) => {
+            const league = getClaimLeague(item.narrative_id);
+            return (
+              <div key={item.id} className="px-5 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-white">{item.text}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {item.mention_count !== undefined && (
+                        <ClaimBadge label={`${item.mention_count} mentions`} tone="neutral" />
+                      )}
+                      {item.confidence !== undefined && (
+                        <ClaimBadge label={`${item.confidence}% confidence`} tone="blue" />
+                      )}
+                      {item.sentiment && (
+                        <ClaimBadge
+                          label={item.sentiment}
+                          tone={getSentimentTone(item.sentiment)}
+                        />
+                      )}
+                      {league && <ClaimBadge label={league} tone="neutral" />}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -124,14 +144,4 @@ function ClaimBadge({ label, tone = "neutral" }: { label: string; tone?: "neutra
       {label}
     </span>
   );
-}
-
-function getFallbackClaims(): Claim[] {
-  return [
-    { id: "1", narrative_id: "1", text: "Arsenal are the strongest title contenders this season.", video_id: "", created_at: "" },
-    { id: "2", narrative_id: "2", text: "VAR decisions are having too much influence on match results.", video_id: "", created_at: "" },
-    { id: "3", narrative_id: "3", text: "Real Madrid have more depth than Barcelona this season.", video_id: "", created_at: "" },
-    { id: "4", narrative_id: "4", text: "Kane has completely transformed Bayern's attack.", video_id: "", created_at: "" },
-    { id: "5", narrative_id: "5", text: "Injuries are hurting Napoli's title chances.", video_id: "", created_at: "" },
-  ];
 }
