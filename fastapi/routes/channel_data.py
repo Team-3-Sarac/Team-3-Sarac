@@ -37,7 +37,7 @@ async def fetch_channels_data(channel_ids):
     """
     Main functionality: Connects to DB, fetches YT metadata,
     and returns a list of dictionaries.
-    
+
     Preservation Logic: Checks if the channel already exists in the 'channels'
     collection to avoid overwriting sentiment data or 'active' status.
     """
@@ -62,27 +62,30 @@ async def fetch_channels_data(channel_ids):
 
             # 3. DB Derivation (Find latest video/count from 'videos' collection)
             cursor = db.videos.find({"channel_id": channel_id}).sort("publish_date", -1)
-            channel_videos = await cursor.to_list(length=1000) 
+            channel_videos = await cursor.to_list(length=1000)
             latest_video = channel_videos[0] if channel_videos else None
 
-            # 4. Build Object with Fallbacks for preserved fields
+            # 4. Build Object matching Channel schema
             return {
                 "channel_id": channel_id,
                 "channel_name": snippet.get("title"),
                 "channel_initials": derive_initials(snippet.get("title")),
                 "handle": snippet.get("customUrl"),
-                "sub_count": stats.get("subscriberCount", "0"), # youtube api returns sub count rounded to 3 sig figs for public access
-                "league": channel_videos[0].get("league") if channel_videos else "Unknown",
+                "sub_count": stats.get("subscriberCount"), # Rounded string representation
+                "league": channel_videos[0].get("league", []) if channel_videos else [],
                 "video_count": len(channel_videos),
-                
-                # Use existing value if it exists, otherwise use default
-                "sentiment_pct": existing_channel.get("sentiment_pct", 0) if existing_channel else 0,
+                "sentiment_pct": existing_channel.get("sentiment_pct", 0.0) if existing_channel else 0.0,
                 "sentiment_dir": existing_channel.get("sentiment_dir", "neutral") if existing_channel else "neutral",
-                
                 "latest_title": latest_video['title'] if latest_video else "N/A",
                 "latest_views": latest_video['view_count'] if latest_video else 0,
                 "active": existing_channel.get("active", True) if existing_channel else True,
-                "last_updated": datetime.now(timezone.utc)
+                "created_at": (
+                    existing_channel["created_at"].isoformat()
+                    if existing_channel and isinstance(existing_channel.get("created_at"), datetime)
+                    else existing_channel.get("created_at") if existing_channel
+                    else datetime.now(timezone.utc).isoformat()
+                ),
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             print(f"Error processing channel {channel_id}: {e}")
@@ -92,7 +95,6 @@ async def fetch_channels_data(channel_ids):
     results = await asyncio.gather(*tasks)
     return [r for r in results if r]
 
-# --- Execution Block ---
 if __name__ == "__main__":
     async def run_standalone():
         ids = [
@@ -103,14 +105,13 @@ if __name__ == "__main__":
             "UC6UL29enLNe4mqwTfAyeNuw"
         ]
 
-        # 1. Run main functionality
         channels_data = await fetch_channels_data(ids)
 
-        # 2. Save to JSON (Only in main)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(script_dir)
         output_path = os.path.join(parent_dir, "data", "channels.json")
 
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(channels_data, f, indent=4, default=json_serial)
 
