@@ -3,7 +3,8 @@ Narrative Grouping and Embeddings Pipeline:
 - Reads claims and embedding vectors from qdrant.
 - Clusters similar claims together into narratives using DBSCAN.
 - Generates labels and descriptions via LLM.
-- Writes result to 'narratives' collection in MongoDB.
+- Writes result to 'narratives' collection via API Ingest Route.
+- Logic: "Living Narrative" - updates existing labels while preserving created_at.
 - Tracks tokens and provides analytics for synthesis.
 - Implements global rate-limit handling and progress tracking.
 """
@@ -14,6 +15,7 @@ import asyncio
 import json
 import re
 import random
+import httpx
 import numpy as np
 import uuid
 from datetime import datetime, timezone
@@ -47,18 +49,30 @@ QDRANT_COLLECTION = "claims_embeddings"
 MAX_CONCURRENT_LLM = 10
 sem = asyncio.Semaphore(MAX_CONCURRENT_LLM)
 
+async def call_ingest_route(api_base_url: str, endpoint: str, data: list):
+    """Helper to send processed narrative data to the FastAPI ingest routes."""
+    async with httpx.AsyncClient() as http_client:
+        try:
+            url = f"{api_base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+            response = await http_client.post(url, json=data)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"[API Error] Failed to call {endpoint}: {e}")
+            return None
+
 async def update_progress(label):
     global completed_narratives
     async with progress_lock:
         completed_narratives += 1
-        print(f"--- [Progress] {completed_narratives}/{total_narratives} | Created Narrative: {label} ---")
+        print(f"--- [Progress] {completed_narratives}/{total_narratives} | Processed Narrative: {label} ---")
 
 async def load_claims_with_embeddings():
     print("Loading claims and embeddings...")
     claims = await db.claims.find().to_list(length=10000)
 
     if not claims:
-        print("  [warning] No claims found. Run LLM.py first.")
+        print("  [warning] No claims found. Run extraction pipeline first.")
         return []
 
     embedding_ids = [str(c["embedding_id"]) for c in claims if c.get("embedding_id")]
@@ -136,7 +150,6 @@ async def generate_narrative_content(claims_in_cluster, retries=5):
                     messages=[{"role": "user", "content": prompt}]
                 )
                 
-                # Track usage
                 usage = response.usage
                 async with progress_lock:
                     total_prompt_tokens += usage.prompt_tokens
@@ -158,7 +171,6 @@ async def generate_narrative_content(claims_in_cluster, retries=5):
                             wait_time = (2 ** attempt) + random.uniform(0, 1)
 
                         print(f"  [GLOBAL PAUSE] {err_msg}")
-                        print(f"  [Rate Limit] Pausing narratives for {wait_time:.2f}s...")
                         await asyncio.sleep(wait_time)
                         rate_limit_event.set()
                     else:
@@ -169,29 +181,24 @@ async def generate_narrative_content(claims_in_cluster, retries=5):
 
     return {"narrative_label": "Unlabeled Topic", "description": "Story generation failed."}
 
-async def process_cluster(cluster_id, claims):
+async def process_cluster(api_base_url, cluster_id, claims):
     intel = await generate_narrative_content(claims)
 
-    # 2. Updated League Extraction:
-    # Since LLM.py now saves a list of 'leagues', we find the most common one in this cluster.
-    league_counts = {}
+    # League Extraction
+    leagues_set = set()
     for item in claims:
-        # LLM.py saves it as 'leagues' (a list)
         found_leagues = item["claim"].get("leagues", [])
         for l in found_leagues:
             if l.lower() != "unknown":
-                league_counts[l] = league_counts.get(l, 0) + 1
+                leagues_set.add(l)
+    leagues_list = list(leagues_set) if leagues_set else ["unknown"]
 
-    # Pick the most frequent league, or default to "International/Misc" if none found
-    if league_counts:
-        league = max(league_counts, key=league_counts.get)
-    else:
-        league = "unknown"
-
+    # Vector Centroid
     vectors = np.array([c["vector"] for c in claims])
     centroid = vectors.mean(axis=0).tolist()
     centroid_id = str(uuid.uuid4())
 
+    # Upsert centroid to Qdrant
     await qdrant.upsert(
         collection_name=QDRANT_COLLECTION,
         points=[PointStruct(
@@ -201,22 +208,24 @@ async def process_cluster(cluster_id, claims):
         )]
     )
 
-    await db.narratives.update_one(
-        {"narrative_label": intel['narrative_label']},
-        {"$set": {
-            "narrative_label": intel['narrative_label'],
-            "league": league,
-            "description": intel['description'],
-            "claim_ids": [c["claim"]["_id"] for c in claims],
-            "embedding_id": centroid_id,
-            "updated_at": datetime.now(timezone.utc)
-        }},
-        upsert=True
-    )
+    # Prepare payload. 
+    # API route will handle preserving created_at via $setOnInsert
+    narrative_payload = [{
+        "narrative_label": intel['narrative_label'],
+        "league": leagues_list,
+        "description": intel['description'],
+        "claim_ids": [str(c["claim"]["_id"]) for c in claims],
+        "embedding_id": centroid_id,
+        "created_at": datetime.now(timezone.utc).isoformat() 
+    }]
     
-    await update_progress(intel['narrative_label'])
+    # Send to API Route
+    result = await call_ingest_route(api_base_url, "/narratives", narrative_payload)
+    
+    if result:
+        await update_progress(intel['narrative_label'])
 
-async def run_pipeline():
+async def run_pipeline(api_base_url="http://localhost:8000/ingest"):
     global total_narratives
     print(f"\n--- Starting Async Narrative Pipeline ---")
 
@@ -229,28 +238,25 @@ async def run_pipeline():
     total_narratives = len(clusters)
 
     if not clusters:
-        print("  [warning] No clusters found. Try increasing eps or lowering min_samples.")
+        print("  [warning] No clusters found.")
         return
 
     print(f"  Clustering complete. Identified {total_narratives} narrative themes.")
 
-    tasks = [process_cluster(cid, claims) for cid, claims in clusters.items()]
+    tasks = [process_cluster(api_base_url, cid, claims) for cid, claims in clusters.items()]
     await asyncio.gather(*tasks)
 
-    # Final Analytics Report
     if total_llm_calls > 0:
         avg_tokens = (total_prompt_tokens + total_completion_tokens) / total_llm_calls
         print("\n" + "="*40)
         print("NARRATIVE GEN PERFORMANCE REPORT")
-        print(f"Narratives Created: {completed_narratives}")
-        print(f"Total LLM Calls:    {total_llm_calls}")
-        print(f"Total Tokens:       {total_prompt_tokens + total_completion_tokens:,}")
-        print(f"Avg Tokens/Story:   {avg_tokens:.1f}")
+        print(f"Narratives Processed: {completed_narratives}")
+        print(f"Total LLM Calls:      {total_llm_calls}")
+        print(f"Total Tokens:         {total_prompt_tokens + total_completion_tokens:,}")
+        print(f"Avg Tokens/Story:     {avg_tokens:.1f}")
         print("="*40)
 
-    final_total = await db.narratives.count_documents({})
-    print(f"\nNarrative pipeline complete. Total narratives in DB: {final_total}")
-    print(f"Pipeline finished.")
+    print(f"\nNarrative pipeline complete.")
 
 if __name__ == "__main__":
     asyncio.run(run_pipeline())

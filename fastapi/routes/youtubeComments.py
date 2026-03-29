@@ -1,17 +1,13 @@
 import json
 import asyncio
 import os
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
-from fastapi import APIRouter
-
 load_dotenv()
 
-#DEVELOPER_KEY = os.getenv("GOOGLE_API_KEY")
-
 DEVELOPER_KEY = os.getenv("YOUTUBE_API_KEY")
-
 
 def get_youtube_client():
     """Creates a new client instance for thread safety."""
@@ -25,7 +21,7 @@ def fetch_single_video_comments(video_id):
     video_comments = []
 
     try:
-        print(f"[Fetching comments for: {video_id}")
+        print(f"[Fetching comments for: {video_id}]")
         request = client.commentThreads().list(
             part = 'snippet',
             videoId = video_id,
@@ -44,7 +40,9 @@ def fetch_single_video_comments(video_id):
                 "author": snippet['authorDisplayName'],
                 "comment_text": snippet['textDisplay'],
                 "like_count": snippet['likeCount'],
-                "created_at": snippet['publishedAt']
+                "embedding_id": "", # Required by Comment schema; to be populated by embedding service
+                "publish_date": snippet['publishedAt'],
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             video_comments.append(comment_data)
 
@@ -72,15 +70,16 @@ if __name__ == "__main__":
     else:
         with open(filtered_path, "r") as f:
             filtered_videos = json.load(f)
-            video_ids = [v["video_id"] for v in filtered_videos]
+            # Match schema's key for the YouTube ID string
+            video_ids = [v["youtube_video_id"] for v in filtered_videos]
 
-    print(f"Starting async comment retrieval for {len(video_ids)} videos...")
-    all_comments_data = asyncio.run(get_comments(video_ids))
+    if video_ids:
+        print(f"Starting async comment retrieval for {len(video_ids)} videos...")
+        all_comments_data = asyncio.run(get_comments(video_ids))
 
-    # Save results to JSON file outside the main function logic
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(all_comments_data, f, indent=4, ensure_ascii=False)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(all_comments_data, f, indent=4, ensure_ascii=False)
 
-    print(f"\n=================================")
-    print(f"Done. Saved {len(all_comments_data)} total comments to {file_path}")
+        print(f"\n=================================")
+        print(f"Done. Saved {len(all_comments_data)} total comments to {file_path}")

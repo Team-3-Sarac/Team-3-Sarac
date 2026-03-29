@@ -118,21 +118,24 @@ def filter_by_views(client, video_ids):
             views = int(stats.get("viewCount", 0))
             if views > VIEW_THRESHOLD:
                 snippet = item["snippet"]
+                now = datetime.now(timezone.utc).isoformat()
                 filtered.append({
-                    "video_id": item["id"],
+                    "youtube_video_id": item["id"], # Renamed to match Video schema
                     "title": snippet["title"],
                     "thumbnail_url": snippet["thumbnails"].get("high", {}).get("url"),
                     "channel_id": snippet["channelId"],
                     "channel_name": snippet["channelTitle"],
                     "publish_date": snippet["publishedAt"],
-                    "league": None,
-                    "teams": None,
+                    "league": [], # Updated to List[str] per schema
+                    "teams": [],
                     "view_count": views,
                     "like_count": int(stats.get("likeCount", 0)),
                     "comment_count": int(stats.get("commentCount", 0)),
                     "duration_seconds": parse_duration(item["contentDetails"]["duration"]),
                     "summary": None,
-                    "created_at": datetime.now(timezone.utc).isoformat()
+                    "sentiment_pct": 0.0, # Added for schema compliance
+                    "created_at": now,
+                    "updated_at": now    # Added for schema compliance
                 })
     return filtered
 
@@ -154,16 +157,16 @@ def process_channel(channel_id, days_back, keywords, exclude_keywords):
         return []
 
 
-"""
-Iterates through a list of channels to retrieve and filter relevant videos.
-
-For each channel, it gets the uploads playlist, retrieves relevant video IDs
-from the last 6 months (filtered by keywords), and keeps videos with > 5000 views.
-
-Returns:
-    list: A list of dictionaries containing video IDs and relevant metadata.
-"""
 async def ingest_from_channels(channel_ids, days_back, keywords, exclude_keywords):
+    """
+    Iterates through a list of channels to retrieve and filter relevant videos.
+
+    For each channel, it gets the uploads playlist, retrieves relevant video IDs
+    from the last 6 months (filtered by keywords), and keeps videos with > 5000 views.
+
+    Returns:
+        list: A list of dictionaries containing video IDs and relevant metadata.
+    """
     all_videos = []
     tasks = [asyncio.to_thread(process_channel, cid, days_back, keywords, exclude_keywords) for cid in channel_ids]
 
@@ -192,5 +195,6 @@ if __name__ == "__main__":
     parent_dir = os.path.dirname(script_dir)
     file_path = os.path.join(parent_dir, "data", "filtered_videos.json")
 
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w") as f:
         json.dump(all_videos, f, indent=4)
