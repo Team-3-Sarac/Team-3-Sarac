@@ -206,21 +206,42 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
 
 @router.post("/narratives")
 async def ingest_narratives(narratives: list[Narrative]):
-    """Ingest high-level narratives/storylines."""
+    """
+    Ingest high-level narratives.
+    Uses upsert logic to ensure 'created_at' is preserved and
+    'updated_at' is refreshed.
+    """
     if not narratives:
         raise HTTPException(status_code=400, detail="Empty narrative list")
-    
-    docs = []
+
+    processed_count = 0
     for n in narratives:
+        # Convert Pydantic model to dict
         doc = n.model_dump(by_alias=True, exclude_none=True)
-        doc["updated_at"] = datetime.now(timezone.utc)
-        # Convert created_at if present as string
-        if isinstance(doc.get("created_at"), str):
-            doc["created_at"] = parse_iso(doc["created_at"])
-        docs.append(doc)
-        
-    result = await db.narratives.insert_many(docs)
-    return {"inserted": len(result.inserted_ids)}
+
+        # Standardize dates
+        current_time = datetime.now(timezone.utc)
+        for field in ["created_at", "updated_at"]:
+            if isinstance(doc.get(field), str):
+                doc[field] = parse_iso(doc[field])
+
+        # Pull out created_at to use specifically for the first-time insert
+        # If the pipeline didn't send one, use current_time
+        initial_date = doc.pop("created_at", current_time)
+        doc["updated_at"] = current_time
+
+        # Match by narrative_label
+        await db.narratives.update_one(
+            {"narrative_label": doc["narrative_label"]},
+            {
+                "$set": doc,
+                "$setOnInsert": {"created_at": initial_date}
+            },
+            upsert=True
+        )
+        processed_count += 1
+
+    return {"processed": processed_count}
 
 @router.post("/claims")
 async def ingest_claims(claims: list[Claim]):

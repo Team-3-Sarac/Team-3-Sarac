@@ -62,7 +62,7 @@ class Video(BaseModel):
 
 class Channel(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-    channel_id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    channel_id: str
     channel_name: str
     channel_initials: str # Derived from channel_name
     handle: str            # Red Text: YouTube @handle
@@ -101,14 +101,19 @@ class Narrative(BaseModel):
 
 class Claim(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-    video_id: Optional[PyObjectId] = Field(alias="video_id", default=None)
+    video_id: str
     chunk_ids: List[PyObjectId]
     source_type: str
     claim_text: str
-    quote: str
+    quote: Optional[str] = None
     confidence: float      # Red Text: Extraction confidence
-    sentiment: str         # Red Text: e.g. "Positive"
-    mentions: int = 1      # Derived
+    sentiment_confidence: Optional[float] = None
+    sentiment: Optional[str] = None
+    sentiment_pct: Optional[float] = None  # The 'score' from LLM
+    risk_level: Optional[str] = None
+    risk_flags: Optional[str] = None
+    narrative_category: Optional[str] = None
+    mentions: int = 0      # Derived
     leagues: List[str] = [] # Red Text: Store as array
     embedding_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
