@@ -1,9 +1,10 @@
 """
 LLM Sentiment & Risk Analysis Pipeline:
 - Reads from 'claims' collection.
-- Filters out already processed claims via MongoDB aggregation.
-- Analyzes sentiment and risk using GPT-4.
-- Stores results in 'sentiment' collection.
+- Filters out already processed claims by checking for sentiment == None.
+- Analyzes sentiment and risk using GPT-4.1-mini.
+- Updates existing documents in the 'claims' collection with sentiment metadata.
+- Aggregates sentiment scores to update associated 'videos' and 'channels'.
 - Tracks tokens and provides analytics for prompt/completion.
 - Implements global rate-limit handling and progress tracking.
 """
@@ -128,45 +129,92 @@ async def analyze_sentiment(claim_text: str, retries=5) -> dict:
 async def process_single_claim(claim):
     claim_id = claim.get("_id")
     claim_text = claim.get("claim_text")
-    video_id = claim.get("video_id")
-    source_type = claim.get("source_type")
 
-    if not claim_text or not claim_text.strip() or not video_id:
+    if not claim_text or not claim_text.strip():
         return
 
     analysis = await analyze_sentiment(claim_text)
     if analysis and analysis.get("sentiment_tone"):
-        doc = {
-            "claim_id": claim_id,
-            "video_id": video_id,
-            "source_type": source_type,
-            "sentiment_tone": analysis.get("sentiment_tone"),
-            "sentiment_score": analysis.get("sentiment_score"),
-            "confidence_score": analysis.get("confidence_score"),
-            "narrative_category": analysis.get("narrative_category"),
-            "risk_flags": analysis.get("risk_flags", ["none"]),
-            "risk_score": analysis.get("risk_score", 0.0),
-            "created_at": datetime.now(timezone.utc)
+        # Update the existing document in 'claims' collection
+        update_doc = {
+            "$set": {
+                "sentiment": analysis.get("sentiment_tone"),
+                "sentiment_pct": analysis.get("sentiment_score"),
+                "sentiment_confidence": analysis.get("confidence_score"),
+                "narrative_category": analysis.get("narrative_category"),
+                "risk_flags": analysis.get("risk_flags", ["none"]),
+                "risk_score": analysis.get("risk_score", 0.0)
+            }
         }
-        await db.sentiment.insert_one(doc)
-        await update_progress(claim_id, doc["sentiment_tone"])
+        await db.claims.update_one({"_id": claim_id}, update_doc)
+        await update_progress(claim_id, analysis.get("sentiment_tone"))
+
+async def update_aggregates():
+    """Aggregates claim sentiments to update video and channel levels with trend direction."""
+    print("Updating video and channel sentiment aggregates...")
+
+    # 1. Update Videos: Average sentiment across all related claims
+    video_pipeline = [
+        {"$match": {"sentiment_pct": {"$ne": None}}},
+        {"$group": {
+            "_id": "$video_id",
+            "avg_sentiment": {"$avg": "$sentiment_pct"}
+        }}
+    ]
+    video_stats = await db.claims.aggregate(video_pipeline).to_list(length=None)
+    
+    for stat in video_stats:
+        await db.videos.update_one(
+            {"youtube_video_id": stat["_id"]},
+            {"$set": {"sentiment_pct": round(stat["avg_sentiment"], 4)}}
+        )
+
+    # 2. Update Channels: Average sentiment across all related videos
+    channel_pipeline = [
+        {"$match": {"sentiment_pct": {"$ne": None}}},
+        {"$group": {
+            "_id": "$channel_id",
+            "avg_sentiment": {"$avg": "$sentiment_pct"}
+        }}
+    ]
+    channel_stats = await db.videos.aggregate(channel_pipeline).to_list(length=None)
+
+    for stat in channel_stats:
+        channel_id = stat["_id"]
+        new_avg = round(stat["avg_sentiment"], 4)
+
+        # Get existing channel data to determine direction
+        existing_channel = await db.channels.find_one({"channel_id": channel_id}, {"sentiment_pct": 1})
+        old_pct = existing_channel.get("sentiment_pct") if existing_channel else None
+
+        # Determine sentiment_dir (Direction of travel)
+        sentiment_dir = "stable"
+        if old_pct is not None:
+            if new_avg > old_pct:
+                sentiment_dir = "up"
+            elif new_avg < old_pct:
+                sentiment_dir = "down"
+
+        await db.channels.update_one(
+            {"channel_id": channel_id},
+            {"$set": {
+                "sentiment_pct": new_avg,
+                "sentiment_dir": sentiment_dir
+            }}
+        )
 
 async def run_pipeline():
     global total_claims_in_batch
     print("Starting sentiment analysis pipeline...")
 
+    # Find claims where 'sentiment' is missing or null
     pipeline = [
         {
-            "$lookup": {
-                "from": "sentiment",
-                "localField": "_id",
-                "foreignField": "claim_id",
-                "as": "existing_sentiment"
-            }
-        },
-        {
             "$match": {
-                "existing_sentiment": {"$size": 0}
+                "$or": [
+                    {"sentiment": {"$exists": False}},
+                    {"sentiment": None}
+                ]
             }
         }
     ]
@@ -177,13 +225,15 @@ async def run_pipeline():
 
     if not unprocessed_claims:
         print("  [info] All claims have already been processed.")
-        return
+    else:
+        print(f"  [batch] Found {total_claims_in_batch} claims to update.")
+        # Create tasks and run them
+        tasks = [process_single_claim(claim) for claim in unprocessed_claims]
+        await asyncio.gather(*tasks)
 
-    print(f"  [batch] Found {total_claims_in_batch} new claims to analyze.")
-
-    # Create tasks and run them
-    tasks = [process_single_claim(claim) for claim in unprocessed_claims]
-    await asyncio.gather(*tasks)
+    # Update Video and Channel aggregates regardless of whether new claims were processed
+    # to ensure consistency across the database.
+    await update_aggregates()
 
     # Performance Reporting
     if total_llm_calls > 0:
@@ -195,8 +245,7 @@ async def run_pipeline():
         print(f"Avg Tokens/Claim:     {avg_tokens:.1f}")
         print("="*40)
 
-    total = await db.sentiment.count_documents({})
-    print(f"\nSentiment pipeline complete. Total sentiment docs: {total}")
+    print(f"\nSentiment update pipeline complete.")
 
 if __name__ == "__main__":
     asyncio.run(run_pipeline())
