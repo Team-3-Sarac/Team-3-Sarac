@@ -4,12 +4,14 @@ import time
 import json
 import requests
 import asyncio
+import argparse
 from datetime import datetime
 
 # Add the parent directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Import your updated async modules
+# Import updated async modules
+from routes.channel_data import fetch_channels_data
 from routes.ingest_videos import ingest_from_channels, KEYWORDS, EXCLUDE_KEYWORDS
 from routes.youtubeComments import get_comments
 from routes.transcript import get_multi_transcripts
@@ -17,8 +19,8 @@ from pipeline.LLM import run_pipeline as run_llm_extraction
 from pipeline.sentiment import run_pipeline as run_sentiment
 from pipeline.narrative_pipeline import run_pipeline as run_narrative_building
 
-# Configuration
-API_BASE_URL = "http://localhost:8000/ingest"
+# Configuration Defaults
+DEFAULT_API_BASE_URL = "http://localhost:8000/ingest"
 CHANNEL_IDS = [
     "UCET00YnetHT7tOpu12v8jxg",
     "UCqZQlzSHbVJrwrn5XvzrzcA",
@@ -55,103 +57,120 @@ class StageTimer:
         print(f"{'TOTAL RUNTIME':.<30} {total_dist:>7.2f}s")
         print("="*40)
 
-async def run_main_pipeline(channel_ids=CHANNEL_IDS, days_back=1):
+async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
     timer = StageTimer()
     overall_start = datetime.now()
     print(f"[{overall_start}] Starting Ingestion Pipeline...")
+    print(f"Target API: {api_base_url}")
 
-    # --- Phase 1: Video Metadata ---
-    timer.start("Phase 1: Video Metadata Fetching")
+    # --- Phase 1: Channel Metadata Fetch & Ingest ---
+    timer.start("Phase 1: Channel Metadata")
+    try:
+        channels_metadata = await fetch_channels_data(channel_ids)
+        if channels_metadata:
+            c_resp = requests.post(f"{api_base_url}/channels", json=channels_metadata)
+            c_resp.raise_for_status()
+            c_data = c_resp.json()
+            print(f"Successfully updated {len(channels_metadata)} channels.")
+            print(f" - Processed: {c_data.get('inserted', 0) or c_data.get('processed', 0)}")
+        else:
+            print("No channel metadata found.")
+        timer.stop("Phase 1: Channel Metadata")
+    except Exception as e:
+        print(f"FAILED Phase 1: {e}")
+
+    # --- Phase 2: Video Metadata Fetch & Ingest ---
+    timer.start("Phase 2: Video Metadata")
     try:
         video_metadata = await ingest_from_channels(channel_ids, days_back, KEYWORDS, EXCLUDE_KEYWORDS)
         if not video_metadata:
             print("No new videos found. Exiting pipeline.")
             return
 
-        video_ids = [v['video_id'] for v in video_metadata]
+        video_ids = [v['youtube_video_id'] for v in video_metadata]
 
-        # Ingest Videos immediately so they exist for linking in later phases
-        v_resp = requests.post(f"{API_BASE_URL}/videos", json=video_metadata)
+        v_resp = requests.post(f"{api_base_url}/videos", json=video_metadata)
         v_resp.raise_for_status()
-        print(f"Successfully ingested {len(video_metadata)} videos.")
-        timer.stop("Phase 1: Video Metadata Fetching")
+        v_data = v_resp.json()
+        print(f"Successfully processed videos. New: {v_data.get('inserted', 0)}, Updated: {v_data.get('updated', 0)}")
+        timer.stop("Phase 2: Video Metadata")
     except Exception as e:
-        print(f"FAILED Phase 1: {e}")
+        print(f"FAILED Phase 2: {e}")
         return
 
-    # --- Phase 2: Content Collection ---
-    timer.start("Phase 2: Transcripts & Comments")
+    # --- Phase 3: Content Collection ---
+    timer.start("Phase 3: Transcripts & Comments Fetching")
     try:
         print(f"Processing {len(video_ids)} videos concurrently...")
-        # Running both fetches at the same time
         all_comments, all_transcripts = await asyncio.gather(
             get_comments(video_ids),
             get_multi_transcripts(video_ids, delay=0)
         )
+        print(f"Collected {len(all_comments)} comments and {len(all_transcripts)} transcripts.")
     except Exception as e:
-        print(f"FAILED Phase 2: {e}")
+        print(f"FAILED Phase 3: {e}")
         all_comments, all_transcripts = [], []
     finally:
-        timer.stop("Phase 2: Transcripts & Comments")
+        timer.stop("Phase 3: Transcripts & Comments Fetching")
 
-    # --- Phase 3: DB Ingestion ---
-    timer.start("Phase 3: MongoDB Ingestion")
+    # --- Phase 4: Content Ingestion ---
+    timer.start("Phase 4: Content MongoDB Ingestion")
     ingestion_payloads = [
-        (all_comments, f"{API_BASE_URL}/comments", "Comments"),
-        (all_transcripts, f"{API_BASE_URL}/transcripts", "Transcripts")
+        (all_comments, f"{api_base_url}/comments", "Comments"),
+        (all_transcripts, f"{api_base_url}/transcripts", "Transcripts")
     ]
 
     for data, endpoint, label in ingestion_payloads:
         if data:
             try:
                 resp = requests.post(endpoint, json=data)
+                resp.raise_for_status()
                 resp_json = resp.json()
-                print(f"Result for {label}: {resp.status_code}")
-                print(f" - Inserted: {resp_json.get('inserted', 0)}")
+                print(f"Status code for {label}: {resp.status_code}")
+                print(f" - Processed/Inserted: {resp_json.get('inserted', 0) or resp_json.get('processed', 0)}")
 
-                # Report on skips if they occurred
                 if resp_json.get("skipped_count"):
                     print(f" - WARNING: Skipped {resp_json['skipped_count']} records.")
-                    print(f" - Missing Video IDs: {resp_json.get('skipped_video_ids', [])}")
             except Exception as e:
                 print(f"Error uploading {label}: {e}")
         else:
             print(f"No {label} data collected.")
+    timer.stop("Phase 4: Content MongoDB Ingestion")
 
-    timer.stop("Phase 3: MongoDB Ingestion")
-
-    # --- Phase 4: Intelligence ---
-    timer.start("Phase 4: LLM Claim Extraction")
+    # --- Intelligence Phases (Passing API URL to extractors) ---
+    timer.start("Phase 5: LLM Claim Extraction")
     try:
-        await run_llm_extraction()
-    except Exception as e:
-        print(f"FAILED Phase 4: {e}")
-    finally:
-        timer.stop("Phase 4: LLM Claim Extraction")
-
-    # --- Phase 5: Sentiment Analysis---
-    timer.start("Phase 5: LLM Sentiment Analysis")
-    try:
-        await run_sentiment()
+        await run_llm_extraction(api_base_url=api_base_url)
     except Exception as e:
         print(f"FAILED Phase 5: {e}")
     finally:
-        timer.stop("Phase 5: LLM Sentiment Analysis")
+        timer.stop("Phase 5: LLM Claim Extraction")
 
-    # --- Phase 6: Narrative Building ---
-    timer.start("Phase 6: LLM Narrative Building")
+    timer.start("Phase 6: LLM Sentiment Analysis")
     try:
-        await run_narrative_building()
+        await run_sentiment()
     except Exception as e:
         print(f"FAILED Phase 6: {e}")
     finally:
-        timer.stop("Phase 6: LLM Narrative Building")
+        timer.stop("Phase 6: LLM Sentiment Analysis")
+
+    timer.start("Phase 7: LLM Narrative Building")
+    try:
+        await run_narrative_building(api_base_url=api_base_url)
+    except Exception as e:
+        print(f"FAILED Phase 7: {e}")
+    finally:
+        timer.stop("Phase 7: LLM Narrative Building")
 
     timer.get_summary()
     print(f"\n[{datetime.now()}] Pipeline Task Completed.")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the Sports Intelligence Ingestion Pipeline.")
+    parser.add_argument("--api-url", type=str, default=DEFAULT_API_BASE_URL, help="Base URL for the ingestion API")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run_main_pipeline())
+        asyncio.run(run_main_pipeline(api_base_url=args.api_url))
     except KeyboardInterrupt:
         print("\nPipeline stopped by user.")
