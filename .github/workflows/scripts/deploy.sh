@@ -1,38 +1,39 @@
 #!/bin/bash
-REPO_DIR="/Team-3-Sarac"
+REPO_DIR="$HOME/Team-3-Sarac"
 FASTAPI_DIR="$REPO_DIR/fastapi"
 VENV_DIR="$FASTAPI_DIR/venv"
-REQ_FILE="$FASTAPI_DIR/"
+REQ_FILE="$FASTAPI_DIR/requirements.txt"
 HASH_STORE="$VENV_DIR/reqs.hash"
-#create a hash of the requirements.txt so if it changes between commits it triggers restart for package installation
 
+cd $REPO_DIR
 
-git fetch origin 
+# Sync code
+git fetch origin main
 git reset --hard origin/main
 
-#FastAPI change monitor code
-if [-d "$VENV_DIR"]; then 
+# Setup Virtual Env
+if [ ! -d "$VENV_DIR" ]; then 
     python3 -m venv $VENV_DIR
 fi
 
+# Hash check for dependencies
 NEW_HASH=$(md5sum $REQ_FILE | awk '{print $1}')
 OLD_HASH=$(cat $HASH_STORE 2>/dev/null)
 
 if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-    echo "!!! Requirements changed. Updating env."
-    deactivate
+    echo "Updating dependencies..."
     source $VENV_DIR/bin/activate
     pip install -r $REQ_FILE
     echo "$NEW_HASH" > $HASH_STORE
-else
-    echo "Requirements unchanged."
 fi
 
-#Relaunch
+# Restart Process
 source $VENV_DIR/bin/activate
-exec uvicorn $FASTAPI_DIR.main:app --host 0.0.0.0 --port 8000
 
+# Kill any old version running on port 8000 so the new one can start
+fuser -k 8000/tcp || true
 
-#Database change monitor
+echo "Starting FastAPI in background..."
+nohup uvicorn main:app --app-dir $FASTAPI_DIR --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 &
 
-
+echo "Deployment complete!"
