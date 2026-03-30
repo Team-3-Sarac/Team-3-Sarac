@@ -274,22 +274,41 @@ async def ingest_claims(claims: list[Claim]):
     return {"inserted": len(result.inserted_ids)}
 
 @router.post("/trends")
+# Change insert_many -> upsert because insert_many will throw duplicate key error when orchestrator runs more than once
+# Upsert will allow safe re-runs and so that DB is updated in place
+# Mirrors ingest_narratives
 async def ingest_trends(trends: list[Trend]):
-    """Ingest trend summaries."""
+    """Ingest/update trend summaries. Uses upsert logic to allow for safe re-runs"""
     if not trends:
         raise HTTPException(status_code=400, detail="Empty trend list")
-    
-    docs = []
+
+    processed_count = 0
     for t in trends:
         doc = t.model_dump(by_alias=True, exclude_none=True)
+        current_time = datetime.now(timezone.utc)
+
         if isinstance(doc.get("last_updated"), str):
             doc["last_updated"] = parse_iso(doc["last_updated"])
-        if isinstance(doc.get("created_at"), str):
-            doc["created_at"] = parse_iso(doc["created_at"])
-        docs.append(doc)
-        
-    result = await db.trends.insert_many(docs)
-    return {"inserted": len(result.inserted_ids)}
+        else:
+            doc["last_updated"] = current_time
+
+        # Pull created_at out of $set so it is only written on first insert
+        initial_date = doc.pop("created_at", current_time)
+        if isinstance(initial_date, str):
+            initial_date = parse_iso(initial_date)
+
+        # Upsert on _id, same pattern as ingest_narratives
+        await db.trends.update_one(
+            {"_id": doc["_id"]},
+            {
+                "$set": doc,
+                "$setOnInsert": {"created_at": initial_date}
+            },
+            upsert=True
+        )
+        processed_count += 1
+
+    return {"processed": processed_count}
 
 @router.post("/trends/meta")
 async def ingest_trend_meta(meta_records: list[TrendMeta]):
