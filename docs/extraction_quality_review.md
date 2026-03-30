@@ -89,5 +89,53 @@ The `mention_count` per narrative has been successfully written to the `trends` 
 
 ---
 
-## Video Audit
-*In progress — Step 2.*
+## Video Audit 
+### Video 2 — Lazio vs. Atalanta: Extended Highlights | Coppa Italia | CBS Sports Golazo
+**Claims found:** 133
+
+| Claim | Quote | Source | Verdict |
+|-------|-------|--------|---------|
+| There is still quality in Latencia | "There's still quality in that Latencia" | Transcript | Hallucination — "Latencia" is not a team, likely a mishearing of "Lazio" |
+| Skamaka dropped down to the bench | "Skamaka dropped down to the bench" | Transcript | Verified |
+| The team is still competing for European football | "Still in the hunt for European football" | Transcript | Verified |
+| Zapacosta had a lovely first touch | "Zapacosta. Lovely first touch." | Transcript | Verified |
+| Kovich scored a goal | "and it's gone in. Kovich wheels away." | Transcript | Verified |
+
+---
+
+### Video 3 — Every Premier League game is a cup final for Spurs
+**Claims found:** 16
+
+| Claim | Quote | Source | Verdict |
+|-------|-------|--------|---------|
+| Spurs are currently being given a rating of 4.7 | "They're currently giving Spurs a 4.7" | Transcript | Missing context — 4.7% of what? Claim strips unit |
+| They get relegated with a probability of about 30% | "I think it's like 30% they get relegated" | Comment | Verified — opinion claim correctly attributed |
+| 4.7% is very generous | "4.7% is VERY generous." | Comment | Verified |
+| This might be the worst Spurs have played since Sol Campbell left | "This might be the worst the Premier League has ever seen spurs play since the season Sol Campbell left" | Comment | Verified |
+| They have literally no defense | "but they have literally no defense" | Comment | Verified — opinion correctly extracted |
+
+---
+
+### Video 4 — Charlie Davies gives his #UCL bracket prediction
+**Claims found:** 89
+
+| Claim | Quote | Source | Verdict |
+|-------|-------|--------|---------|
+| They are playing beautifully | "playing beautifully" | Transcript | Missing subject — unclear who "they" refers to |
+| They have Yamal | "they have Yamal" | Transcript | Missing subject — same issue |
+| Arsenal is too strong | "Arsenal too strong" | Transcript | Verified |
+| Kane and Diaz are difficult to stop | "Kane, and Diaz. How can you stop them?" | Transcript | Verified |
+| PSG plays against Bayern Munich | "PSG verse Bayern Munich." | Transcript | Verified |
+
+---
+
+### Video 5 — Too Little, Too Late for Barcelona in Copa del Rey Semifinal
+**Claims found:** 348
+
+| Claim | Quote | Source | Verdict |
+|-------|-------|--------|---------|
+| The aggregate score was 4-3 | "just uh one goal short on aggregate 4-3" | Transcript | Verified |
+| Bernal scored a goal | "goal from Bernal" | Transcript | Verified |
+| They almost got found out by Barcelona | "almost got found out by Barcelona cuz" | Transcript | Incomplete — "cuz" suggests sentence was cut off mid-transcript |
+| Barcel were good | "Barcel were good" | Transcript | Hallucination — "Barcel" is not a real team name, likely garbled transcription of "Barcelona" |
+| Barcel were not good enough | "Just not good enough" | Transcript | Same issue — subject "Barcel" is a transcription error |
