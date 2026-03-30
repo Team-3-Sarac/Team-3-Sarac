@@ -18,4 +18,15 @@ jobs:
           username: ${{ secrets.HETZNER_USERNAME }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
           command_timeout: 10m
-          script: bash /Team-3-Sarac/scripts/deploy.sh
+          script: |
+            # 1. Create directory if missing
+            mkdir -p ~/Team-3-Sarac
+            cd ~/Team-3-Sarac
+            
+            # 2. Initialize git if not already there
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            fi
+            
+            # 3. Now run the deploy script
+            bash scripts/deploy.sh
