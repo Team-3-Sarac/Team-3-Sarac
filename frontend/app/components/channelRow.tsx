@@ -1,9 +1,7 @@
-import Pill from "../components/pill";
-import Sentiment from "../components/sentiment";
-import ChannelAvatar from "../components/channelAvatar";
-import Toggle from "../components/toggle";
+import Badge from "../components/badge";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
-type Channel = {
+type ChannelRowData = {
   id: string;
   initials: string;
   name: string;
@@ -18,55 +16,100 @@ type Channel = {
   active: boolean;
 };
 
+function getSentimentLabel(pct: number): string {
+  if (pct >= 60) return "Positive";
+  if (pct >= 40) return "Neutral";
+  return "Negative";
+}
+
 export default function ChannelRow({
   row,
   onToggle,
 }: {
-  row: Channel;
+  row: ChannelRowData;
   onToggle: () => void;
 }) {
+  const sentimentTone =
+    row.sentimentPct >= 60 ? "pos" : row.sentimentPct >= 40 ? "neu" : "neg";
+
+  const SentimentIcon =
+    row.sentimentDir === "up"
+      ? TrendingUp
+      : row.sentimentDir === "down"
+      ? TrendingDown
+      : Minus;
+
+  const sentimentColor =
+    row.sentimentDir === "up"
+      ? "text-emerald-400"
+      : row.sentimentDir === "down"
+      ? "text-red-400"
+      : "text-neutral-500";
+
   return (
-    <div className="grid grid-cols-12 items-center gap-4 px-5 py-4">
-      {/* Channel */}
+    <div className="grid grid-cols-12 items-center gap-4 px-6 py-4 transition-colors hover:bg-[#161616]">
+
+      {/* Channel identity */}
       <div className="col-span-4 flex items-center gap-3 min-w-0">
-        <ChannelAvatar initials={row.initials} />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/8 bg-white/5 text-[12px] font-bold text-neutral-300">
+          {row.initials}
+        </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{row.name}</div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500">
-            <span className="truncate">{row.handle}</span>
-            <span className="text-neutral-700">•</span>
-            <span className="shrink-0">{row.subs}</span>
-          </div>
+          <div className="truncate text-[13px] font-semibold text-white/90">{row.name}</div>
+          <div className="text-[11px] text-neutral-600">{row.handle}</div>
         </div>
       </div>
 
       {/* League */}
       <div className="col-span-2">
-        <Pill>{row.league}</Pill>
+        <Badge tone="neutral">{row.league}</Badge>
       </div>
 
       {/* Videos */}
-      <div className="col-span-1 text-right text-sm font-semibold">{row.videos}</div>
+      <div className="col-span-1 text-right">
+        <span className="tabular-nums text-[13px] text-neutral-400">{row.videos}</span>
+      </div>
 
       {/* Sentiment */}
-      <div className="col-span-1 text-right text-sm">
-        <Sentiment pct={row.sentimentPct} dir={row.sentimentDir} />
+      <div className="col-span-2 flex items-center justify-end gap-2">
+        <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums ${sentimentColor}`}>
+          <SentimentIcon className="h-3 w-3 shrink-0" />
+          {row.sentimentPct}%
+        </span>
+        <Badge tone={sentimentTone}>{getSentimentLabel(row.sentimentPct)}</Badge>
       </div>
 
-      {/* Latest */}
-      <div className="col-span-3 min-w-0">
-        <div className="flex items-start gap-2">
-          <span className="mt-0.5 text-neutral-600">▷</span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{row.latestTitle}</div>
-            <div className="mt-1 text-xs text-neutral-500">{row.latestViews}</div>
-          </div>
-        </div>
+      {/* Latest video */}
+      <div className="col-span-2 min-w-0">
+        <div className="truncate text-[12px] text-neutral-400">{row.latestTitle}</div>
+        <div className="mt-0.5 text-[11px] text-neutral-600">{row.latestViews}</div>
       </div>
 
-      {/* Active */}
-      <div className="col-span-1 flex justify-end">
-        <Toggle on={row.active} onClick={onToggle} />
+      {/* Active toggle */}
+      <div className="col-span-1 flex items-center justify-end">
+        <button
+          onClick={onToggle}
+          className="group flex items-center gap-1.5"
+          title={row.active ? "Deactivate" : "Activate"}
+        >
+          <span
+            className={[
+              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors duration-200",
+              row.active
+                ? "border-teal-500/40 bg-teal-500/20"
+                : "border-white/8 bg-white/4",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "absolute top-0.5 h-4 w-4 rounded-full transition-transform duration-200",
+                row.active
+                  ? "translate-x-4 bg-teal-400 shadow-[0_0_6px_rgba(45,212,191,0.6)]"
+                  : "translate-x-0.5 bg-neutral-600",
+              ].join(" ")}
+            />
+          </span>
+        </button>
       </div>
     </div>
   );

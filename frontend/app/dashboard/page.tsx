@@ -1,24 +1,33 @@
 "use client";
 import { useEffect, useState } from "react";
+import Skeleton from "../components/skeleton";
 import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
 import KpiCard from "../components/kpiCard";
+import VideoRow from "../components/videoRow";
+import EventRow from "../components/eventRow";
+import LeagueRow from "../components/leagueRow";
+import SectionLabel from "../components/sectionLabel";
+import EmptyState from "../components/emptyState";
 import SentimentChart from "../components/sentimentChart";
-import { getDashboardKPIs, getLeagueStats, getVideos, getEvents } from "../../api/backend";
+import {
+  getDashboardKPIs,
+  getLeagueStats,
+  getVideos,
+  getEvents,
+  getSentimentHistory,
+} from "../../api/backend";
 
 import {
   TrendingUp,
   Video,
   Activity,
   Users,
-  Play,
-  Clock,
-  Eye,
-  ThumbsUp,
-  MessageSquare,
   Sparkles,
   AlertTriangle,
 } from "lucide-react";
+
+/* ---------------- Types ---------------- */
 
 type KPIs = {
   videos_analyzed: number;
@@ -47,147 +56,349 @@ type VideoData = {
   publish_date: string;
 };
 
+type Event = {
+  id: string;
+  event_type: string;
+  description: string;
+  created_at: string;
+};
+
+type SentimentData = {
+  week: string;
+  positive: number;
+  negative: number;
+};
+
+/* ---------------- Helpers ---------------- */
+
+function useCountUp(target: number | null, duration = 1200) {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    if (target === null) return;
+
+    const finalTarget = target; // TS now knows this is a number
+    const startTime = performance.now();
+
+    function animate(now: number) {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.floor(eased * finalTarget));
+
+      if (progress < 1) requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+  }, [target, duration]);
+
+  return value;
+}
+
+function formatNumber(num: number): string {
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return num.toLocaleString();
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds) return "--:--";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function getRelativeTime(dateStr: string): string {
+  if (!dateStr) return "Unknown";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffHours < 1) return "Just now";
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "1 day ago";
+  return `${diffDays} days ago`;
+}
+
+function getSentimentTone(val: number): "pos" | "neu" | "neg" {
+  if (val >= 60) return "pos";
+  if (val >= 40) return "neu";
+  return "neg";
+}
+
+function getSentimentLabel(value: number) {
+  if (value >= 60) return "Positive";
+  if (value >= 40) return "Neutral";
+  return "Negative";
+}
+
+function getEventIcon(eventType: string) {
+  switch (eventType) {
+    case "goal":     return <Sparkles className="h-3.5 w-3.5 text-emerald-400" />;
+    case "red_card": return <AlertTriangle className="h-3.5 w-3.5 text-red-400" />;
+    case "injury":   return <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />;
+    case "var":      return <TrendingUp className="h-3.5 w-3.5 text-sky-400" />;
+    default:         return <Sparkles className="h-3.5 w-3.5 text-neutral-500" />;
+  }
+}
+
+const leagueCodeMap: Record<string, string> = {
+  "Premier League": "ENG",
+  "La Liga": "ESP",
+  Bundesliga: "GER",
+  "Serie A": "ITA",
+  "Ligue 1": "FRA",
+};
+
+/* ─── Loading skeletons for lists ─── */
+function ListSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-white/4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-4 px-6 py-4">
+          <Skeleton className="h-18 w-32 shrink-0" />
+          <div className="flex flex-1 flex-col gap-2 py-1">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-4/5" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EventSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-white/4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-3 px-6 py-4">
+          <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-3.5 w-4/5" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LeagueSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-white/4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-6 w-9 rounded-md" />
+            <Skeleton className="h-3.5 w-24" />
+          </div>
+          <Skeleton className="h-5 w-16 rounded-md" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ================================================================
+   PAGE
+================================================================ */
+
+const ALL_LEAGUES = ["All", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
+
 export default function DashboardPage() {
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [videos, setVideos] = useState<VideoData[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState<any[]>([]);
+  const [kpisError, setKpisError] = useState(false);
+  const [leaguesError, setLeaguesError] = useState(false);
+  const [videosError, setVideosError] = useState(false);
+  const [eventsError, setEventsError] = useState(false);
+  const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
+  const [sentimentError, setSentimentError] = useState(false);
+  const [activeLeague, setActiveLeague] = useState("All");
+
+  const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
+  const animatedTopics = useCountUp(kpis?.trending_topics ?? null);
+  const animatedChannels = useCountUp(kpis?.channels_tracked ?? null);
+  const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
 
   useEffect(() => {
     async function fetchData() {
-      try {
-        const [kpiRes, leagueRes, videoRes, eventsRes] = await Promise.all([
-          getDashboardKPIs(),
-          getLeagueStats(),
-          getVideos({ limit: 10 }),
-          getEvents(5),
+      const timeout = (ms: number) =>
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout")), ms)
+        );
+      const withTimeout = (p: Promise<any>) => Promise.race([p, timeout(5000)]);
+
+      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes] =
+        await Promise.allSettled([
+          withTimeout(getDashboardKPIs()),
+          withTimeout(getLeagueStats()),
+          withTimeout(getVideos({ limit: 10 })),
+          withTimeout(getEvents(5)),
+          withTimeout(getSentimentHistory()),
         ]);
-        setKpis(kpiRes);
-        setLeagues(leagueRes.leagues || []);
-        setVideos(videoRes.videos || []);
-        setEvents(eventsRes.events || []);
-      } catch (err) {
-        console.error("Failed to fetch dashboard data:", err);
-      } finally {
-        setLoading(false);
+
+      if (kpiRes.status === "fulfilled") setKpis(kpiRes.value);
+      else setKpisError(true);
+
+      if (leagueRes.status === "fulfilled")
+        setLeagues(leagueRes.value.leagues || []);
+      else setLeaguesError(true);
+
+      if (videoRes.status === "fulfilled")
+        setVideos(videoRes.value.videos || []);
+      else setVideosError(true);
+
+      if (eventsRes.status === "fulfilled")
+        setEvents(eventsRes.value.events || []);
+      else setEventsError(true);
+
+      if (sentimentRes.status === "fulfilled") {
+        const formatted = (sentimentRes.value.weeks || []).map(
+          (w: any, i: number) => ({
+            ...w,
+            week:
+              ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7] ||
+              w.week,
+          })
+        );
+        setSentimentHistory(formatted);
+      } else {
+        setSentimentError(true);
       }
+
+      setLoading(false);
     }
     fetchData();
   }, []);
 
-  const leagueCodeMap: Record<string, string> = {
-    "Premier League": "ENG",
-    "La Liga": "ESP",
-    Bundesliga: "GER",
-    "Serie A": "ITA",
-    "Ligue 1": "FRA",
-  };
+  const sentimentTone = kpis
+    ? getSentimentTone(kpis.avg_sentiment)
+    : "neu";
 
-  const formatNumber = (num: number): string => {
-    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-    return num.toString();
-  };
-
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  const getSentimentTone = (): "pos" | "neu" | "neg" => {
-    if (!kpis) return "neu";
-    if (kpis.avg_sentiment >= 70) return "pos";
-    if (kpis.avg_sentiment >= 40) return "neu";
-    return "neg";
-  };
-
-  const getRelativeTime = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffHours < 1) return "Just now";
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return "1 day ago";
-    return `${diffDays} days ago`;
-  };
+  const filteredVideos =
+    activeLeague === "All"
+      ? videos
+      : videos.filter((v) => v.league === activeLeague);
 
   return (
-    <div className="min-h-screen w-full bg-black text-white">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="text-sm text-neutral-400">Real-time sports intelligence from YouTube content analysis</div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Dashboard</h1>
+    <div className="relative min-h-screen w-full overflow-x-hidden bg-[#080808] text-white">
+
+      {/* ── Subtle grid background ── */}
+      <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.03]">
+        <div
+          className="h-full w-full"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, white 1px, transparent 1px),
+              linear-gradient(to bottom, white 1px, transparent 1px)
+            `,
+            backgroundSize: "80px 80px",
+          }}
+        />
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+
+        {/* ── Page header ── */}
+        <div className="mb-10">
+          <SectionLabel>Overview</SectionLabel>
+          <h1
+            className="mt-2 text-[clamp(2rem,4vw,2.8rem)] font-black leading-tight tracking-[-0.02em]"
+            style={{ fontFamily: "'DM Serif Display', Georgia, serif" }}
+          >
+            Dashboard
+          </h1>
+          <p className="mt-2 text-sm text-neutral-500">
+            Real-time YouTube intelligence across top soccer channels
+          </p>
         </div>
 
-        {/* KPI Row */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        {/* ── accent line ── */}
+        <div className="mb-6 h-px w-full bg-linear-to-r from-transparent via-teal-500/30 to-transparent" />
+
+        {/* ── KPIs ── */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard
+            icon={<Video className="h-3.5 w-3.5" />}
             title="Videos Analyzed"
-            value={kpis ? kpis.videos_analyzed.toLocaleString() : "..."}
-            sub={kpis ? `+${kpis.videos_this_week} this week` : ""}
-            trend="up"
-            icon={<Video className="h-4 w-4 text-neutral-400" />}
+            value={kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
+            sub={kpisError ? "Failed to load" : kpis ? `+${kpis.videos_this_week} this week` : "Loading…"}
+            loading={loading}
           />
           <KpiCard
+            icon={<TrendingUp className="h-3.5 w-3.5" />}
             title="Trending Topics"
-            value={kpis ? kpis.trending_topics.toString() : "..."}
-            sub={kpis ? `+${kpis.topics_since_yesterday} since yesterday` : ""}
-            trend="up"
-            icon={<TrendingUp className="h-4 w-4 text-neutral-400" />}
+            value={kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—"}
+            sub={kpisError ? "Failed to load" : kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…"}
+            loading={loading}
           />
           <KpiCard
+            icon={<Activity className="h-3.5 w-3.5" />}
             title="Avg. Sentiment"
-            value={kpis ? `${Math.round(kpis.avg_sentiment)}%` : "..."}
-            sub="+4.2% positive"
-            trend="up"
-            icon={<Activity className="h-4 w-4 text-neutral-400" />}
+            value={kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—"}
+            sub={kpisError ? "Failed to load" : kpis ? getSentimentLabel(kpis.avg_sentiment) + " overall" : "Loading…"}
+            loading={loading}
           />
           <KpiCard
+            icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
-            value={kpis ? kpis.channels_tracked.toString() : "..."}
-            sub={`${leagues.length} leagues`}
-            trend="flat"
-            icon={<Users className="h-4 w-4 text-neutral-400" />}
+            value={kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—"}
+            sub={kpisError ? "Failed to load" : leagues.length ? `${leagues.length} leagues` : "Loading…"}
+            loading={loading}
           />
         </div>
 
-        {/* Main Grid */}
+        {/* ── Sentiment + Events ── */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Sentiment Trend (real chart) */}
-          <Card className="lg:col-span-2">
+          <Card className="lg:col-span-2 flex flex-col">
             <CardHeader
               title="Sentiment Trend"
               subtitle="Weekly fan sentiment across all leagues"
               right={
-                <div className="flex items-center gap-4 text-xs text-neutral-400">
-                  <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-sky-400" />
+                <div className="flex items-center gap-4 text-[11px] text-neutral-500">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
                     Positive
                   </span>
-                  <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                     Negative
                   </span>
                 </div>
               }
             />
-            <div className="px-5 pb-5">
-              <SentimentChart />
+            <div className="flex-1 px-6 pb-6 pt-4">
+              {loading ? (
+                <Skeleton className="h-56 w-full" />
+              ) : sentimentError ? (
+                <EmptyState message="Failed to load sentiment data" />
+              ) : sentimentHistory.length === 0 ? (
+                <EmptyState message="No sentiment data available" />
+              ) : (
+                <div className="h-full">
+                  <SentimentChart data={sentimentHistory} />
+                </div>
+              )}
             </div>
           </Card>
 
-          {/* Key Events - Mock data as per user request */}
           <Card>
-            <CardHeader title="Key Events" subtitle="Highlights detected across tracked leagues" />
-            <div className="divide-y divide-neutral-800">
-              {loading || events.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-neutral-500">No events available</div>
+            <CardHeader
+              title="Key Events"
+              subtitle="Highlights detected across leagues"
+            />
+            <div className="divide-y divide-white/4">
+              {loading ? (
+                <EventSkeleton />
+              ) : eventsError ? (
+                <EmptyState message="Failed to load events" />
+              ) : events.length === 0 ? (
+                <EmptyState message="No events available" />
               ) : (
                 events.map((event) => (
                   <EventRow
@@ -202,23 +413,53 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Lower Grid */}
+        {/* ── Videos + League Overview ── */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Trending Match Content */}
           <Card className="lg:col-span-2">
-            <CardHeader title="Trending Match Content" subtitle="Most engaging soccer content from tracked channels" />
-            <div className="divide-y divide-neutral-800">
-              {loading || videos.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-neutral-500">No videos available</div>
+            <CardHeader
+              title="Trending Match Content"
+              subtitle="Most engaging soccer content from tracked channels"
+            />
+            {/* League filter tabs */}
+            <div className="flex gap-1 overflow-x-auto border-b border-white/6 px-6 pb-0 pt-3 scrollbar-none">
+              {ALL_LEAGUES.map((lg) => (
+                <button
+                  key={lg}
+                  onClick={() => setActiveLeague(lg)}
+                  className={[
+                    "relative shrink-0 rounded-t-md px-3.5 py-2 text-[12px] font-medium transition-colors duration-150",
+                    activeLeague === lg
+                      ? "text-white"
+                      : "text-neutral-500 hover:text-neutral-300",
+                  ].join(" ")}
+                >
+                  {activeLeague === lg && (
+                    <span className="absolute inset-0 rounded-t-md bg-white/5 ring-1 ring-inset ring-white/[0.07]" />
+                  )}
+                  {activeLeague === lg && (
+                    <span className="absolute bottom-0 left-1/2 h-px w-5 -translate-x-1/2 rounded-full bg-teal-400/80" />
+                  )}
+                  <span className="relative">{lg}</span>
+                </button>
+              ))}
+            </div>
+            <div className="divide-y divide-white/4">
+              {loading ? (
+                <ListSkeleton />
+              ) : videosError ? (
+                <EmptyState message="Failed to load videos" />
+              ) : filteredVideos.length === 0 ? (
+                <EmptyState message={activeLeague === "All" ? "No videos available" : `No ${activeLeague} videos available`} />
               ) : (
-                videos.map((video) => (
+                filteredVideos.map((video) => (
                   <VideoRow
                     key={video.video_id}
+                    videoId={video.video_id}
                     league={video.league || "Unknown"}
-                    sentiment={`positive ${Math.round(kpis?.avg_sentiment || 72)}%`}
-                    sentimentTone={getSentimentTone()}
+                    sentiment={`${Math.round(kpis?.avg_sentiment ?? 0)}%`}
+                    sentimentTone={sentimentTone}
                     title={video.title}
-                    channel={video.channel_name}
+                    channel={video.channel_name || "Unknown channel"}
                     duration={formatDuration(video.duration_seconds)}
                     views={formatNumber(video.view_count)}
                     likes={formatNumber(video.like_count)}
@@ -230,17 +471,27 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          {/* League Overview */}
           <Card>
-            <CardHeader title="League Overview" subtitle="Content volume & status by league" />
-            <div className="divide-y divide-neutral-800">
-              {loading || leagues.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-neutral-500">No leagues available</div>
+            <CardHeader
+              title="League Overview"
+              subtitle="Content volume & status by league"
+            />
+            <div className="divide-y divide-white/4">
+              {loading ? (
+                <LeagueSkeleton />
+              ) : leaguesError ? (
+                <EmptyState message="Failed to load leagues" />
+              ) : leagues.length === 0 ? (
+                <EmptyState message="No leagues available" />
               ) : (
-                leagues.map((league) => (
+              leagues.map((league) => (
                   <LeagueRow
                     key={league.league}
-                    code={leagueCodeMap[league.league] || "UNK"}
+                    code={
+                      leagueCodeMap[league.league] ||
+                      league.league?.slice(0, 3).toUpperCase() ||
+                      "UNK"
+                    }
                     league={league.league}
                     count={league.count.toString()}
                     status={league.status}
@@ -250,133 +501,7 @@ export default function DashboardPage() {
             </div>
           </Card>
         </div>
-      </div>
-    </div>
-  );
-}
 
-/* ---------------- Components ---------------- */
-
-function EventRow({ icon, title, time }: { icon: React.ReactNode; title: string; time: string }) {
-  return (
-    <div className="flex gap-3 px-5 py-4">
-      <div className="mt-0.5">{icon}</div>
-      <div className="min-w-0">
-        <div className="truncate text-sm font-medium">{title}</div>
-        <div className="text-xs text-neutral-500">{time}</div>
-      </div>
-    </div>
-  );
-}
-
-function getEventIcon(eventType: string) {
-  switch (eventType) {
-    case "goal": return <Sparkles className="h-4 w-4 text-emerald-400" />;
-    case "red_card": return <AlertTriangle className="h-4 w-4 text-red-400" />;
-    case "injury": return <AlertTriangle className="h-4 w-4 text-amber-400" />;
-    case "var": return <TrendingUp className="h-4 w-4 text-sky-400" />;
-    default: return <Sparkles className="h-4 w-4 text-neutral-400" />;
-  }
-}
-
-function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "pos" | "neu" | "neg" }) {
-  const cls =
-    tone === "pos"
-      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/20"
-      : tone === "neu"
-      ? "bg-amber-500/15 text-amber-300 border-amber-500/20"
-      : tone === "neg"
-      ? "bg-red-500/15 text-red-300 border-red-500/20"
-      : "bg-neutral-800/40 text-neutral-200 border-neutral-700";
-
-  return (
-    <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] ${cls}`}>
-      {children}
-    </span>
-  );
-}
-
-function VideoRow({
-  league,
-  sentiment,
-  sentimentTone,
-  title,
-  channel,
-  duration,
-  views,
-  likes,
-  comments,
-  age,
-}: {
-  league: string;
-  sentiment: string;
-  sentimentTone: "pos" | "neu" | "neg";
-  title: string;
-  channel: string;
-  duration: string;
-  views: string;
-  likes: string;
-  comments: string;
-  age: string;
-}) {
-  return (
-    <div className="flex gap-5 px-5 py-5">
-      {/* thumb */}
-      <div className="relative h-20 w-36 shrink-0 overflow-hidden rounded-xl border border-neutral-800 bg-gradient-to-br from-neutral-900 to-neutral-950">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Play className="h-6 w-6 text-neutral-400" />
-        </div>
-        <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-[11px] text-neutral-200">
-          {duration}
-        </div>
-      </div>
-
-      {/* content */}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="neutral">{league}</Badge>
-          <Badge tone={sentimentTone}>{sentiment}</Badge>
-        </div>
-
-        <div className="mt-2 truncate text-sm font-semibold">{title}</div>
-        <div className="mt-0.5 text-xs text-neutral-500">{channel}</div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-neutral-500">
-          <span className="inline-flex items-center gap-1">
-            <Eye className="h-3.5 w-3.5" /> {views}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <ThumbsUp className="h-3.5 w-3.5" /> {likes}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <MessageSquare className="h-3.5 w-3.5" /> {comments}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <Clock className="h-3.5 w-3.5" /> {age}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LeagueRow({ code, league, count, status }: { code: string; league: string; count: string; status: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="inline-flex h-7 w-9 items-center justify-center rounded-md bg-neutral-900 text-[10px] text-neutral-200 border border-neutral-800">
-          {code}
-        </span>
-        <div className="truncate text-sm font-medium">{league}</div>
-      </div>
-
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="text-xs text-neutral-500">{count}</div>
-        {status ? (
-          <span className="rounded-md bg-sky-500/15 px-2 py-1 text-[11px] text-sky-300 border border-sky-500/20">
-            {status}
-          </span>
-        ) : null}
       </div>
     </div>
   );

@@ -29,18 +29,20 @@ export default function LineChartComponent() {
     fetchData();
   }, []);
 
-  if (loading || data.length === 0) {
+  if (loading) {
+    return <div className="relative h-64 animate-pulse rounded-xl bg-white/4" />;
+  }
+
+  if (data.length === 0) {
     return (
-      <div className="relative h-64 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 p-4">
-        <div className="flex h-full items-center justify-center text-neutral-500">
-          Loading...
-        </div>
+      <div className="flex h-64 items-center justify-center text-sm text-neutral-500">
+        No trend history available
       </div>
     );
   }
 
   return (
-    <div className="relative h-64 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 p-4">
+    <div className="relative h-64">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
           <XAxis 

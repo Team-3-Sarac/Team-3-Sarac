@@ -1,42 +1,45 @@
-import {
-  ArrowUpRight,
-  ArrowDownRight,
-} from "lucide-react";
+import Card from "../components/card";
+import Skeleton from "../components/skeleton";
 
 export default function KpiCard({
   title,
   value,
   sub,
-  trend,
   icon,
+  loading,
 }: {
   title: string;
   value: string;
   sub: string;
-  trend: "up" | "down" | "flat";
   icon: React.ReactNode;
+  loading: boolean;
 }) {
-  const TrendIcon =
-    trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : null;
-
-  const trendColor =
-    trend === "up"
-      ? "text-emerald-400"
-      : trend === "down"
-      ? "text-red-400"
-      : "text-neutral-400";
-
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 px-5 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-neutral-400">{title}</div>
-        {icon}
-      </div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
-      <div className={`mt-1 flex items-center gap-1 text-xs ${trendColor}`}>
-        {TrendIcon ? <TrendIcon className="h-3.5 w-3.5" /> : null}
-        <span>{sub}</span>
-      </div>
-    </div>
-  );
-}
+      <Card className="flex flex-col gap-3 p-6">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-500">
+            {title}
+          </span>
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[0.07] bg-white/4 text-neutral-400">
+            {icon}
+          </div>
+        </div>
+        {loading ? (
+          <>
+            <Skeleton className="h-8 w-24" />
+            <Skeleton className="h-3 w-32" />
+          </>
+        ) : (
+          <>
+            <div
+              className="text-[2rem] font-black leading-none tracking-tight text-white"
+              style={{ fontFamily: "'DM Serif Display', Georgia, serif" }}
+            >
+              {value}
+            </div>
+            <div className="text-xs text-emerald-400">{sub}</div>
+          </>
+        )}
+      </Card>
+    );
+  }

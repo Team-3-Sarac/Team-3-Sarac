@@ -36,43 +36,17 @@ export default function BarChartComponent() {
     fetchData();
   }, []);
 
-  if (loading || data.length === 0) {
+  if (loading) {
+    return <div className="relative h-56 animate-pulse rounded-xl bg-white/4" />;
+  }
+
+  if (data.length === 0) {
     return (
-      <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4">
-        <div className="flex h-56 items-center justify-center text-neutral-500">
-          Loading...
-        </div>
+      <div className="flex h-56 items-center justify-center text-sm text-neutral-500">
+        No league data available
       </div>
     );
   }
-
-  return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4">
-      <div className="relative h-56">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-            <XAxis 
-              dataKey="label" 
-              tick={{ fill: '#737373', fontSize: 12 }}
-              axisLine={{ stroke: '#404040' }}
-              tickLine={{ stroke: '#404040' }}
-              dy={10}
-            />
-            <YAxis 
-              tick={{ fill: '#737373', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill="#0ea5e9" />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
 }
 
 function getLeagueShortName(league: string): string {

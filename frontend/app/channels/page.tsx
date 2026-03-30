@@ -1,8 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
+import Skeleton from "../components/skeleton";
+import SectionLabel from "../components/sectionLabel";
+import Card from "../components/card";
+import EmptyState from "../components/emptyState";
 import KpiCard from "../components/kpiCard";
 import ChannelRow from "../components/channelRow";
 import { getChannels, getDashboardKPIs, getVideos } from "../../api/backend";
+import {
+  Video,
+  Activity,
+  Users,
+  Zap,
+} from "lucide-react";
+
+/* ---------------- Types ---------------- */
 
 type Channel = {
   channel_id: string;
@@ -28,146 +40,43 @@ type ChannelRowData = {
   active: boolean;
 };
 
-export default function ChannelsPage() {
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [videos, setVideos] = useState<any[]>([]);
-  const [kpis, setKpis] = useState<{ videos_analyzed: number; avg_sentiment: number } | null>(null);
-  const [rows, setRows] = useState<ChannelRowData[]>([]);
-  const [loading, setLoading] = useState(true);
+/* ---------------- Helpers ---------------- */
+
+function useCountUp(target: number | null, duration = 1200) {
+  const [value, setValue] = useState(0);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [channelsRes, kpisRes, videosRes] = await Promise.all([
-          getChannels(),
-          getDashboardKPIs(),
-          getVideos({ limit: 100 }),
-        ]);
-        setChannels(channelsRes.channels || []);
-        setKpis(kpisRes);
-        setVideos(videosRes.videos || []);
+    if (target === null) return;
 
-        // Transform backend channels to frontend row format with real data
-        const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
-          // Find latest video for this channel
-          const channelVideos = videosRes.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
-          const latestVideo = channelVideos[0];
-          
-          // Calculate sentiment from videos
-          const avgSentiment = 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100);
-          
-          return {
-            id: c.channel_id,
-            initials: getInitials(c.channel_name),
-            name: c.channel_name,
-            handle: `@${c.channel_name.replace(/\s+/g, "")}`,
-            subs: formatSubs(c.total_views),
-            league: getMostCommonLeague(channelVideos),
-            videos: c.video_count,
-            sentimentPct: Math.min(95, Math.max(30, avgSentiment)),
-            sentimentDir: avgSentiment > 70 ? "up" : avgSentiment < 50 ? "down" : "flat",
-            latestTitle: latestVideo?.title || "No recent videos",
-            latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
-            active: true,
-          };
-        });
-        setRows(transformed);
-      } catch (err) {
-        console.error("Failed to fetch channels data:", err);
-      } finally {
-        setLoading(false);
-      }
+    const finalTarget = target; // TS now knows this is a number
+    const startTime = performance.now();
+
+    function animate(now: number) {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.floor(eased * finalTarget));
+
+      if (progress < 1) requestAnimationFrame(animate);
     }
-    fetchData();
-  }, []);
 
-  const stats = {
-    channelsTracked: channels.length,
-    activeCount: rows.filter((r) => r.active).length,
-    pausedCount: rows.filter((r) => !r.active).length,
-    totalVideos: kpis ? kpis.videos_analyzed : 0,
-    avgSent: kpis ? Math.round(kpis.avg_sentiment) : 72,
-    apiUsed: 74,
-    apiText: "7,420 / 10,000 daily",
-  };
+    requestAnimationFrame(animate);
+  }, [target, duration]);
 
-  const toggleActive = (id: string) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)));
-  };
-
-  return (
-    <div className="min-h-screen w-full bg-black text-white">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">Channels</h1>
-          <p className="mt-2 text-sm text-neutral-400">
-            YouTube channels being monitored for sports content analysis
-          </p>
-        </div>
-
-        {/* KPI Row */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <KpiCard
-            title="Channels Tracked"
-            value={`${stats.channelsTracked}`}
-            trend="up"
-            sub={`${stats.activeCount} active, ${stats.pausedCount} paused`}
-            icon="📺"
-          />
-          <KpiCard
-            title="Total Videos"
-            value={`${stats.totalVideos}`}
-            trend="down"
-            sub="Last 30 days"
-            icon="🎬"
-          />
-          <KpiCard
-            title="Avg. Sentiment"
-            value={`${stats.avgSent}%`}
-            trend="down"
-            sub="Across all channels"
-            icon="📈"
-          />
-          <KpiCard
-            title="API Quota Used"
-            value={`${stats.apiUsed}%`}
-            trend="up"
-            sub={stats.apiText}
-            icon="⚡"
-          />
-        </div>
-
-        {/* Table */}
-        <div className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950/40 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-          {/* Header row */}
-          <div className="grid grid-cols-12 gap-4 border-b border-neutral-800 px-5 py-3 text-xs uppercase tracking-wide text-neutral-500">
-            <div className="col-span-4">Channel</div>
-            <div className="col-span-2">League</div>
-            <div className="col-span-1 text-right">Videos</div>
-            <div className="col-span-1 text-right">Sentiment</div>
-            <div className="col-span-3">Latest Video</div>
-            <div className="col-span-1 text-right">Active</div>
-          </div>
-
-          <div className="divide-y divide-neutral-800">
-            {loading || rows.length === 0 ? (
-              <div className="px-5 py-10 text-center text-sm text-neutral-500">No channels available</div>
-            ) : (
-              rows.map((r) => (
-                <ChannelRow key={r.id} row={r} onToggle={() => toggleActive(r.id)} />
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return value;
 }
 
 function getInitials(name: string): string {
-  const words = name.split(" ").slice(0, 2);
-  return words.map((w) => w[0]?.toUpperCase()).join("");
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
+
+function formatNumber(num: number): string {
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return num.toLocaleString();
 }
 
 function formatSubs(views: number): string {
@@ -182,15 +91,228 @@ function formatViews(views: number): string {
   return `${views} views`;
 }
 
-// league data temporarily blocked
 function getMostCommonLeague(videos: any[]): string {
   if (!videos.length) return "Multi-League";
-  
   const counts: Record<string, number> = {};
   for (const v of videos) {
     if (v.league) counts[v.league] = (counts[v.league] || 0) + 1;
   }
-  
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  return sorted[0]?.[0] || "Multi-League"; // if no videos or null
+  return sorted[0]?.[0] || "Multi-League";
+}
+
+function getSentimentLabel(pct: number): string {
+  if (pct >= 60) return "Positive";
+  if (pct >= 40) return "Neutral";
+  return "Negative";
+}
+
+/* ---------------- Table Skeleton ---------------- */
+
+function TableSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-white/4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="grid grid-cols-12 items-center gap-4 px-6 py-4">
+          <div className="col-span-4 flex items-center gap-3">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-28" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </div>
+          <div className="col-span-2"><Skeleton className="h-5 w-20 rounded-md" /></div>
+          <div className="col-span-1 flex justify-end"><Skeleton className="h-3.5 w-8" /></div>
+          <div className="col-span-2 flex justify-end gap-2">
+            <Skeleton className="h-3.5 w-10" />
+            <Skeleton className="h-5 w-16 rounded-md" />
+          </div>
+          <div className="col-span-2 flex flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+          <div className="col-span-1 flex justify-end"><Skeleton className="h-5 w-9 rounded-full" /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ================================================================
+   PAGE
+================================================================ */
+
+export default function ChannelsPage() {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [kpis, setKpis] = useState<{ videos_analyzed: number; avg_sentiment: number } | null>(null);
+  const [rows, setRows] = useState<ChannelRowData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const animatedChannels = useCountUp(channels.length ?? null);
+  const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
+  const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
+  
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [channelsRes, kpisRes, videosRes] = await Promise.all([
+          getChannels(),
+          getDashboardKPIs(),
+          getVideos({ limit: 100 }),
+        ]);
+        setChannels(channelsRes.channels || []);
+        setKpis(kpisRes);
+
+        const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
+          const channelVideos =
+            videosRes.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
+          const latestVideo = channelVideos[0];
+          const avgSentiment = Math.min(
+            95,
+            Math.max(30, 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100))
+          );
+          return {
+            id: c.channel_id,
+            initials: getInitials(c.channel_name),
+            name: c.channel_name,
+            handle: `@${c.channel_name.replace(/\s+/g, "")}`,
+            subs: formatSubs(c.total_views),
+            league: getMostCommonLeague(channelVideos),
+            videos: c.video_count,
+            sentimentPct: avgSentiment,
+            sentimentDir: avgSentiment > 70 ? "up" : avgSentiment < 50 ? "down" : "flat",
+            latestTitle: latestVideo?.title || "No recent videos",
+            latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
+            active: true,
+          };
+        });
+        setRows(transformed);
+      } catch (err) {
+        console.error("Failed to fetch channels data:", err);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const toggleActive = (id: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r))
+    );
+  };
+
+  const activeCount = rows.filter((r) => r.active).length;
+  const pausedCount = rows.filter((r) => !r.active).length;
+
+  return (
+    <div className="relative min-h-screen w-full overflow-x-hidden bg-[#080808] text-white">
+
+      {/* ── Grid background ── */}
+      <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.03]">
+        <div
+          className="h-full w-full"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, white 1px, transparent 1px),
+              linear-gradient(to bottom, white 1px, transparent 1px)
+            `,
+            backgroundSize: "80px 80px",
+          }}
+        />
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+
+        {/* ── Page header ── */}
+        <div className="mb-10">
+          <SectionLabel>Monitoring</SectionLabel>
+          <h1
+            className="mt-2 text-[clamp(2rem,4vw,2.8rem)] font-black leading-tight tracking-[-0.02em]"
+            style={{ fontFamily: "'DM Serif Display', Georgia, serif" }}
+          >
+            Channels
+          </h1>
+          <p className="mt-2 text-sm text-neutral-500">
+            Explore performance trends from soccer-focused YouTube creators
+          </p>
+        </div>
+
+        {/* ── Accent line ── */}
+        <div className="mb-6 h-px w-full bg-linear-to-r from-transparent via-teal-500/30 to-transparent" />
+
+        {/* ── KPIs ── */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <KpiCard
+            icon={<Users className="h-3.5 w-3.5" />}
+            title="Channels Tracked"
+            value={error ? "—" : formatNumber(animatedChannels)}
+            sub={error ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
+            loading={loading}
+          />
+          <KpiCard
+            icon={<Video className="h-3.5 w-3.5" />}
+            title="Total Videos"
+            value={error ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
+            sub={error ? "Failed to load" : "Across all tracked channels"}
+            loading={loading}
+          />
+          <KpiCard
+            icon={<Activity className="h-3.5 w-3.5" />}
+            title="Avg. Sentiment"
+            value={loading || !kpis ? "—" : `${Math.round(animatedSentiment)}%`}
+            sub={
+              error ? "Failed to load" :
+              kpis
+                ? kpis.avg_sentiment >= 60 ? "Positive overall"
+                : kpis.avg_sentiment >= 40 ? "Neutral overall"
+                : "Negative overall"
+                : "Loading…"
+            }
+            loading={loading}
+          />
+          <KpiCard
+            icon={<Zap className="h-3.5 w-3.5" />}
+            title="API Quota Used"
+            value="N/A"
+            sub="Not available"
+            loading={false}
+          />
+        </div>
+
+        {/* ── Channel table ── */}
+        <div className="mt-6">
+          <Card>
+            {/* Table header */}
+            <div className="grid grid-cols-12 items-center gap-4 border-b border-white/6 px-6 py-3">
+              <div className="col-span-4 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Channel</div>
+              <div className="col-span-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">League</div>
+              <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Videos</div>
+              <div className="col-span-2 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Sentiment</div>
+              <div className="col-span-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Latest Video</div>
+              <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Active</div>
+            </div>
+
+            <div className="divide-y divide-white/4">
+              {loading ? (
+                <TableSkeleton />
+              ) : error ? (
+                <EmptyState message="Failed to load channels" />
+              ) : rows.length === 0 ? (
+                <EmptyState message="No channels available" />
+              ) : (
+                rows.map((r) => (
+                  <ChannelRow key={r.id} row={r} onToggle={() => toggleActive(r.id)} />
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
+
+      </div>
+    </div>
+  );
 }
