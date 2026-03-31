@@ -136,10 +136,12 @@ class Trend(BaseModel):
     Tactics: int = 0
     Controversy: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 class TrendMeta(BaseModel):
     id: MeasurementID = Field(alias="_id") 
-    value: int
+    value: float
     sentiment: float
 '''
 Treat this class as like a measure for attention and overall sentiment surrounding a topic
