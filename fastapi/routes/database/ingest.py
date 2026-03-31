@@ -7,6 +7,7 @@ from .schema import (
     MatchEvent, TranscriptIn, VideoOut, CommentOut, TranscriptSegmentOut,
     DashboardKPIs, LeagueStats, ChannelStats
 )
+from typing import Optional
 
 router = APIRouter()
 
@@ -694,3 +695,156 @@ async def get_events(limit: int = Query(default=10, ge=1, le=100)):
         return {"events": events, "count": len(events)}
     except Exception:
         return {"events": [], "count": 0}
+
+
+# ============== Creator Risk Endpoints ==============
+
+
+@router.get("/channels/risk")
+async def get_channels_with_risk(
+    risk_level: Optional[str] = None,
+    min_risk_score: Optional[float] = None,
+    max_risk_score: Optional[float] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Get channels filtered by risk criteria."""
+    query = {}
+    
+    if risk_level:
+        query["risk_level"] = risk_level.lower()
+    
+    if min_risk_score is not None:
+        query["risk_score"] = {"$gte": min_risk_score}
+    
+    if max_risk_score is not None:
+        if "risk_score" in query:
+            query["risk_score"]["$lte"] = max_risk_score
+        else:
+            query["risk_score"] = {"$lte": max_risk_score}
+
+    # Aggregate by channel with risk data
+    pipeline = [
+        {
+            "$match": query if query else {}
+        },
+        {
+            "$group": {
+                "_id": "$channel_id",
+                "channel_name": {"$first": "$channel_name"},
+                "video_count": {"$sum": 1},
+                "total_views": {"$sum": "$view_count"},
+                "total_likes": {"$sum": "$like_count"},
+                "total_comments": {"$sum": "$comment_count"},
+                "risk_score": {"$first": "$risk_score"},
+                "risk_level": {"$first": "$risk_level"},
+                "risk_breakdown": {"$first": "$risk_breakdown"},
+            }
+        },
+        {"$sort": {"risk_score": -1}},
+        {"$limit": limit},
+    ]
+
+    channels = []
+    async for doc in db.videos.aggregate(pipeline):
+        channels.append({
+            "channel_id": doc["_id"],
+            "channel_name": doc["channel_name"],
+            "video_count": doc["video_count"],
+            "total_views": doc["total_views"],
+            "total_likes": doc["total_likes"],
+            "total_comments": doc["total_comments"],
+            "risk_score": doc.get("risk_score"),
+            "risk_level": doc.get("risk_level"),
+            "risk_breakdown": doc.get("risk_breakdown"),
+        })
+
+    return {"channels": channels, "count": len(channels)}
+
+
+@router.get("/channels/{channel_id}/risk")
+async def get_channel_risk(channel_id: str):
+    """Get detailed risk breakdown for a specific channel."""
+    # Get channel's videos with risk data
+    pipeline = [
+        {
+            "$match": {"channel_id": channel_id}
+        },
+        {
+            "$group": {
+                "_id": "$channel_id",
+                "channel_name": {"$first": "$channel_name"},
+                "video_count": {"$sum": 1},
+                "avg_risk_score": {"$avg": "$risk_score"},
+                "risk_level": {"$first": "$risk_level"},
+                "risk_breakdown": {"$first": "$risk_breakdown"},
+                "videos_with_risk": {"$sum": {"$cond": [{"$ne": ["$risk_score", None]}, 1, 0]}},
+            }
+        }
+    ]
+
+    result = await db.videos.aggregate(pipeline).to_list(length=1)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    
+    channel_data = result[0]
+    
+    # Get sample high-risk videos for this channel
+    high_risk_videos = []
+    cursor = db.videos.find(
+        {"channel_id": channel_id, "risk_score": {"$gte": 50}},
+        {"youtube_video_id": 1, "title": 1, "risk_score": 1, "risk_level": 1, "risk_breakdown": 1}
+    ).sort("risk_score", -1).limit(5)
+    
+    async for doc in cursor:
+        high_risk_videos.append({
+            "video_id": doc["youtube_video_id"],
+            "title": doc["title"],
+            "risk_score": doc.get("risk_score"),
+            "risk_level": doc.get("risk_level"),
+            "risk_breakdown": doc.get("risk_breakdown"),
+        })
+
+    return {
+        "channel_id": channel_id,
+        "channel_name": channel_data["channel_name"],
+        "video_count": channel_data["video_count"],
+        "videos_with_risk": channel_data["videos_with_risk"],
+        "avg_risk_score": round(channel_data["avg_risk_score"], 2) if channel_data["avg_risk_score"] else None,
+        "risk_level": channel_data["risk_level"],
+        "risk_breakdown": channel_data.get("risk_breakdown"),
+        "high_risk_videos": high_risk_videos,
+    }
+
+
+@router.get("/videos/risk")
+async def get_videos_with_risk(
+    channel_id: Optional[str] = None,
+    min_risk_score: Optional[float] = None,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """Get videos filtered by risk criteria."""
+    query = {}
+    
+    if channel_id:
+        query["channel_id"] = channel_id
+    
+    if min_risk_score is not None:
+        query["risk_score"] = {"$gte": min_risk_score}
+
+    cursor = db.videos.find(query).sort("risk_score", -1).limit(limit)
+    
+    videos = []
+    async for doc in cursor:
+        videos.append({
+            "video_id": doc["youtube_video_id"],
+            "title": doc["title"],
+            "channel_id": doc["channel_id"],
+            "channel_name": doc["channel_name"],
+            "risk_score": doc.get("risk_score"),
+            "risk_level": doc.get("risk_level"),
+            "risk_breakdown": doc.get("risk_breakdown"),
+            "publish_date": doc["publish_date"].isoformat() if isinstance(doc["publish_date"], datetime) else doc["publish_date"],
+        })
+
+    return {"videos": videos, "count": len(videos)}
