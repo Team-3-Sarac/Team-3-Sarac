@@ -287,10 +287,10 @@ async def ingest_trends(trends: list[Trend]):
         doc = t.model_dump(by_alias=True, exclude_none=True)
         current_time = datetime.now(timezone.utc)
 
-        if isinstance(doc.get("last_updated"), str):
-            doc["last_updated"] = parse_iso(doc["last_updated"])
+        if isinstance(doc.get("updated_at"), str):
+            doc["updated_at"] = parse_iso(doc["updated_at"])
         else:
-            doc["last_updated"] = current_time
+            doc["updated_at"] = current_time
 
         # Pull created_at out of $set so it is only written on first insert
         initial_date = doc.pop("created_at", current_time)
@@ -315,17 +315,28 @@ async def ingest_trend_meta(meta_records: list[TrendMeta]):
     """Ingest snapshot measurements for trend tracking."""
     if not meta_records:
         raise HTTPException(status_code=400, detail="Empty meta list")
-    
-    docs = []
+
+    upserted = 0
+    modified = 0
+
     for m in meta_records:
         doc = m.model_dump(by_alias=True)
-        # Handle composite _id timestamp
+
+        # Normalize composite _id timestamp to datetime
         if isinstance(doc["_id"].get("ts"), str):
             doc["_id"]["ts"] = parse_iso(doc["_id"]["ts"])
-        docs.append(doc)
-        
-    result = await db.trend_meta.insert_many(docs)
-    return {"inserted": len(result.inserted_ids)}
+
+        result = await db.trend_meta.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"value": doc["value"], "sentiment": doc["sentiment"]}},
+            upsert=True
+        )
+        if result.upserted_id:
+            upserted += 1
+        else:
+            modified += result.modified_count
+
+    return {"upserted": upserted, "modified": modified}
 
 @router.post("/events")
 async def ingest_match_events(events: list[MatchEvent]):
