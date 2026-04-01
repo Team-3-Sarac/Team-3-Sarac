@@ -7,6 +7,7 @@ import KpiCard from "../components/kpiCard";
 import VideoRow from "../components/videoRow";
 import EventRow from "../components/eventRow";
 import LeagueRow from "../components/leagueRow";
+import ClaimRow from "../components/claimRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
 import SentimentChart from "../components/sentimentChart";
@@ -16,6 +17,7 @@ import {
   getVideos,
   getEvents,
   getSentimentHistory,
+  getDashboardClaims,
 } from "../../api/backend";
 
 import {
@@ -25,6 +27,7 @@ import {
   Users,
   Sparkles,
   AlertTriangle,
+  MessageSquare,
 } from "lucide-react";
 
 /* ---------------- Types ---------------- */
@@ -60,6 +63,16 @@ type Event = {
   id: string;
   event_type: string;
   description: string;
+  created_at: string;
+};
+
+type Claim = {
+  id: string;
+  claim_text: string;
+  sentiment?: string | null;
+  sentiment_pct?: number | null;
+  mentions?: number;
+  narrative_category?: string | null;
   created_at: string;
 };
 
@@ -211,11 +224,13 @@ export default function DashboardPage() {
   const [leagues, setLeagues] = useState<League[]>([]);
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
   const [kpisError, setKpisError] = useState(false);
   const [leaguesError, setLeaguesError] = useState(false);
   const [videosError, setVideosError] = useState(false);
   const [eventsError, setEventsError] = useState(false);
+  const [claimsError, setClaimsError] = useState(false);
   const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
   const [sentimentError, setSentimentError] = useState(false);
   const [activeLeague, setActiveLeague] = useState("All");
@@ -233,13 +248,14 @@ export default function DashboardPage() {
         );
       const withTimeout = (p: Promise<any>) => Promise.race([p, timeout(5000)]);
 
-      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes] =
+      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes, claimsRes] =
         await Promise.allSettled([
           withTimeout(getDashboardKPIs()),
           withTimeout(getLeagueStats()),
           withTimeout(getVideos({ limit: 10 })),
           withTimeout(getEvents(5)),
           withTimeout(getSentimentHistory()),
+          withTimeout(getDashboardClaims(8)),
         ]);
 
       if (kpiRes.status === "fulfilled") setKpis(kpiRes.value);
@@ -256,6 +272,10 @@ export default function DashboardPage() {
       if (eventsRes.status === "fulfilled")
         setEvents(eventsRes.value.events || []);
       else setEventsError(true);
+
+      if (claimsRes.status === "fulfilled")
+        setClaims(claimsRes.value.claims || []);
+      else setClaimsError(true);
 
       if (sentimentRes.status === "fulfilled") {
         const formatted = (sentimentRes.value.weeks || []).map(
@@ -495,6 +515,35 @@ export default function DashboardPage() {
                     league={league.league}
                     count={league.count.toString()}
                     status={league.status}
+                  />
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* ── Emerging Claims ── */}
+        <div className="mt-6">
+          <Card>
+            <CardHeader
+              title="Emerging Claims"
+              subtitle="Trending narratives across all channels"
+            />
+            <div className="divide-y divide-white/4">
+              {loading ? (
+                <ListSkeleton />
+              ) : claimsError ? (
+                <EmptyState message="Failed to load claims" />
+              ) : claims.length === 0 ? (
+                <EmptyState message="No claims available" />
+              ) : (
+                claims.map((claim) => (
+                  <ClaimRow
+                    key={claim.id}
+                    text={claim.claim_text}
+                    category={claim.narrative_category}
+                    sentiment={claim.sentiment}
+                    mentions={claim.mentions}
                   />
                 ))
               )}

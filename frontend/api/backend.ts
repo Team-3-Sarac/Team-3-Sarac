@@ -199,3 +199,52 @@ export async function getEvents(limit?: number) {
     return { events: [] };
   }
 }
+
+export async function getDashboardClaims(limit?: number) {
+  const searchParams = new URLSearchParams();
+  if (limit) searchParams.set("limit", limit.toString());
+
+  const res = await fetch(`${API_BASE}/ingest/dashboard/claims?${searchParams.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch dashboard claims");
+  return res.json();
+}
+
+// ============== Creator Risk Endpoints ==============
+
+export async function getChannelRisk(channelId: string) {
+  const res = await fetch(`${API_BASE}/ingest/channels/${channelId}/risk`);
+  if (!res.ok) throw new Error("Failed to fetch channel risk");
+  return res.json();
+}
+
+export async function getChannelsWithRisk(params?: {
+  risk_level?: string;
+  min_risk_score?: number;
+  max_risk_score?: number;
+  limit?: number;
+}) {
+  const searchParams = new URLSearchParams();
+  if (params?.risk_level) searchParams.set("risk_level", params.risk_level);
+  if (params?.min_risk_score !== undefined) searchParams.set("min_risk_score", params.min_risk_score.toString());
+  if (params?.max_risk_score !== undefined) searchParams.set("max_risk_score", params.max_risk_score.toString());
+  if (params?.limit) searchParams.set("limit", params.limit.toString());
+
+  const res = await fetch(`${API_BASE}/ingest/channels/risk?${searchParams.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch channels with risk");
+  return res.json();
+}
+
+export async function getVideosWithRisk(params?: {
+  channel_id?: string;
+  min_risk_score?: number;
+  limit?: number;
+}) {
+  const searchParams = new URLSearchParams();
+  if (params?.channel_id) searchParams.set("channel_id", params.channel_id);
+  if (params?.min_risk_score !== undefined) searchParams.set("min_risk_score", params.min_risk_score.toString());
+  if (params?.limit) searchParams.set("limit", params.limit.toString());
+
+  const res = await fetch(`${API_BASE}/ingest/videos/risk?${searchParams.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch videos with risk");
+  return res.json();
+}
