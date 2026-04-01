@@ -18,6 +18,7 @@ from routes.transcript import get_multi_transcripts
 from pipeline.LLM import run_pipeline as run_llm_extraction
 from pipeline.sentiment import run_pipeline as run_sentiment
 from pipeline.narrative_pipeline import run_pipeline as run_narrative_building
+from pipeline.trends_service import calculate_trends
 
 # Configuration Defaults
 DEFAULT_API_BASE_URL = "http://localhost:8000/ingest"
@@ -161,6 +162,14 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
         print(f"FAILED Phase 7: {e}")
     finally:
         timer.stop("Phase 7: LLM Narrative Building")
+
+    timer.start("Phase 8: Trend Calculation")
+    try:
+        await calculate_trends(api_base_url=api_base_url)
+    except Exception as e:
+        print(f"FAILED Phase 8: {e}")
+    finally:
+        timer.stop("Phase 8: Trend Calculation")
 
     timer.get_summary()
     print(f"\n[{datetime.now()}] Pipeline Task Completed.")
