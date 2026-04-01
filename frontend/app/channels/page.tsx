@@ -7,7 +7,7 @@ import EmptyState from "../components/emptyState";
 import KpiCard from "../components/kpiCard";
 import ChannelRow from "../components/channelRow";
 import RiskModal from "../components/riskModal";
-import { getChannels, getDashboardKPIs, getVideos, getChannelRisk } from "../../api/backend";
+import { getChannels, getDashboardKPIs, getVideos, getChannelRisk, getChannelsWithRisk } from "../../api/backend";
 import {
   Video,
   Activity,
@@ -160,24 +160,35 @@ export default function ChannelsPage() {
   const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
   const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
 
-  // Calculate average risk score
-  const avgRiskScore = rows.length > 0
-    ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.length)
+  // Calculate average risk score from real data
+  const avgRiskScore = rows.length > 0 && rows.some(r => r.riskScore !== null)
+    ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.filter(r => r.riskScore !== null).length)
     : 0;
 
   const highRiskCount = rows.filter((r) => r.riskLevel === "high" || r.riskLevel === "critical").length;
+  const channelsWithRisk = rows.filter(r => r.riskScore !== null).length;
 
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [channelsRes, kpisRes, videosRes] = await Promise.all([
+        const [channelsRes, kpisRes, videosRes, riskRes] = await Promise.all([
           getChannels(),
           getDashboardKPIs(),
           getVideos({ limit: 100 }),
+          getChannelsWithRisk({ limit: 500 }),
         ]);
         setChannels(channelsRes.channels || []);
         setKpis(kpisRes);
+
+        // Create a map of risk data by channel_id
+        const riskMap = new Map();
+        (riskRes.channels || []).forEach((c: any) => {
+          riskMap.set(c.channel_id, {
+            riskScore: c.risk_score,
+            riskLevel: c.risk_level,
+          });
+        });
 
         const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
           const channelVideos =
@@ -187,9 +198,9 @@ export default function ChannelsPage() {
             95,
             Math.max(30, 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100))
           );
-          // Mock risk data for now (will be replaced with real API data)
-          const mockRiskScore = Math.floor(Math.random() * 100);
-          const mockRiskLevel = mockRiskScore >= 76 ? "critical" : mockRiskScore >= 51 ? "high" : mockRiskScore >= 26 ? "medium" : "low";
+          
+          // Use real risk data from backend
+          const riskData = riskMap.get(c.channel_id);
           
           return {
             id: c.channel_id,
@@ -204,8 +215,8 @@ export default function ChannelsPage() {
             latestTitle: latestVideo?.title || "No recent videos",
             latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
             active: true,
-            riskScore: mockRiskScore,
-            riskLevel: mockRiskLevel,
+            riskScore: riskData?.riskScore ?? null,
+            riskLevel: riskData?.riskLevel ?? null,
           };
         });
         setRows(transformed);
@@ -338,7 +349,7 @@ export default function ChannelsPage() {
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
             title="Avg Risk Score"
             value={loading || error ? "—" : `${avgRiskScore}`}
-            sub={error ? "Failed to load" : `${highRiskCount} high-risk channels`}
+            sub={error ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
             loading={loading}
           />
         </div>

@@ -1,5 +1,5 @@
 import Badge from "../components/badge";
-import { TrendingUp, TrendingDown, Minus, Shield Alert, ShieldCheck, Shield } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ShieldAlert, ShieldCheck, Shield } from "lucide-react";
 
 type ChannelRowData = {
   id: string;

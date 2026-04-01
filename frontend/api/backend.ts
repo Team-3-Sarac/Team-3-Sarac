@@ -200,6 +200,15 @@ export async function getEvents(limit?: number) {
   }
 }
 
+export async function getDashboardClaims(limit?: number) {
+  const searchParams = new URLSearchParams();
+  if (limit) searchParams.set("limit", limit.toString());
+
+  const res = await fetch(`${API_BASE}/ingest/dashboard/claims?${searchParams.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch dashboard claims");
+  return res.json();
+}
+
 // ============== Creator Risk Endpoints ==============
 
 export async function getChannelRisk(channelId: string) {
