@@ -508,7 +508,7 @@ async def get_dashboard_kpis():
         {"$group": {"_id": None, "avg_sentiment": {"$avg": "$sentiment_pct"}}}
     ]
     sentiment_result = await db.videos.aggregate(sentiment_pipeline).to_list(length=1)
-    avg_sentiment = round(sentiment_result[0]["avg_sentiment"], 1) if sentiment_result else 0
+    avg_sentiment = round(sentiment_result[0]["avg_sentiment"], 1) if sentiment_result and sentiment_result[0].get("avg_sentiment") else 0
 
     # Channels tracked (distinct channel_id from videos)
     channels_tracked = len(await db.videos.distinct("channel_id"))

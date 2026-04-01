@@ -289,7 +289,7 @@ export default function ChannelsPage() {
         />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-12">
 
         {/* ── Page header ── */}
         <div className="mb-10">
@@ -309,7 +309,7 @@ export default function ChannelsPage() {
         <div className="mb-6 h-px w-full bg-linear-to-r from-transparent via-teal-500/30 to-transparent" />
 
         {/* ── KPIs ── */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
