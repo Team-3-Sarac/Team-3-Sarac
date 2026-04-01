@@ -3,7 +3,7 @@ from bson import ObjectId
 from datetime import datetime
 from routes.database.database import db
 from routes.database.schema import TrendOut, NarrativeOut, ClaimOut
-from routes.trends_service import calculate_trends as calc_trends
+from pipeline.trends_service import calculate_trends as calc_trends
 
 router = APIRouter()
 
