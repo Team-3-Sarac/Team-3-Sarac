@@ -108,10 +108,15 @@ def init_qdrant_collection(force_reset=False):
         print(f"[qdrant] Collection exists: {QDRANT_COLLECTION}")
 
 def build_prompt(text_with_ids: list, source: str) -> str:
+    # Use simple aliases like "id1", "id2" instead of raw ObjectIds
+    aliased = [{"alias": f"id{i+1}", "real_id": item["id"], "text": item["text"]}
+               for i, item in enumerate(text_with_ids)]
     entries = "\n\n".join(
-        [f"SOURCE_ID: {item['id']}\nTEXT: {item['text']}" for item in text_with_ids]
+        [f"SOURCE_ID: {a['alias']}\nTEXT: {a['text']}" for a in aliased]
     )
-    return f"""
+
+    alias_map = {a["alias"]: a["real_id"] for a in aliased}
+    prompt = f"""
 You are a high-level Sports Intelligence System. Your task is to extract significant, actionable claims from the following {source}.
 
 ### RELEVANCE GUARD:
@@ -140,12 +145,14 @@ Return ONLY valid JSON in this structure:
 ### TEXT TO ANALYZE:
 {entries}
 """
+    return prompt, alias_map
 
 async def extract_claims(data: list, source: str, vid: str, retries=5) -> dict:
     global total_prompt_tokens, total_completion_tokens, total_llm_calls
-    if not data: return {}
+    if not data:
+        return {}, {}
 
-    prompt = build_prompt(data, source)
+    prompt, alias_map = build_prompt(data, source)
     for attempt in range(retries):
         # Wait if the global rate limit event is cleared (paused)
         await rate_limit_event.wait()
@@ -167,7 +174,7 @@ async def extract_claims(data: list, source: str, vid: str, retries=5) -> dict:
                     total_llm_calls += 1
 
                 parsed = json.loads(response.choices[0].message.content)
-                return parsed
+                return parsed, alias_map
 
             except Exception as e:
                 err_msg = str(e)
@@ -193,8 +200,8 @@ async def extract_claims(data: list, source: str, vid: str, retries=5) -> dict:
                         await rate_limit_event.wait()
                 else:
                     print(f"[Error] LLM {vid}: {e}")
-                    return {}
-    return {}
+                    return {}, {}
+    return {}, {}
 
 async def get_embeddings_batch(texts: list[str], vid: str):
     if not texts: return []
@@ -219,14 +226,18 @@ async def save_embeddings_batch(texts: list[str], vectors: list):
     qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
     return [p.id for p in points]
 
-async def save_claims(api_base_url, video_id, source_type, extracted_data, original_batch_data):
+async def save_claims(api_base_url, video_id, source_type, extracted_data, original_batch_data, alias_map):
     if not extracted_data: return
 
     raw_claims = extracted_data.get("claims", [])
     raw_leagues = extracted_data.get("detected_leagues", "Unknown")
     leagues_list = [l.strip() for l in raw_leagues.split(",") if l.strip()]
 
-    source_map = {item['id']: item['text'] for item in original_batch_data}
+    # Key source_map by alias (e.g. "id1") so lookups match what the LLM returned.
+    source_map = {a["alias"]: item["text"] for a, item in zip(
+        [{"alias": f"id{i+1}"} for i in range(len(original_batch_data))],
+        original_batch_data
+    )}
 
     texts, filtered = [], []
     for claim in raw_claims:
@@ -248,10 +259,16 @@ async def save_claims(api_base_url, video_id, source_type, extracted_data, origi
 
     docs = []
     for i, claim in enumerate(filtered):
-        source_ids = claim.get("source_ids", [])
+        source_aliases = claim.get("source_ids", [])
+        
+        real_chunk_ids = [
+            alias_map[alias]
+                for alias in source_aliases
+                if alias in alias_map
+        ]
 
         # Determine mathematical confidence by comparing claim vector to source chunk vector
-        combined_source_text = " ".join([source_map.get(sid, "") for sid in source_ids]).strip()
+        combined_source_text = " ".join([source_map.get(alias, "") for alias in source_aliases]).strip()
 
         confidence_score = 0.0
         if combined_source_text:
@@ -262,7 +279,7 @@ async def save_claims(api_base_url, video_id, source_type, extracted_data, origi
 
         docs.append({
             "video_id": str(video_id),
-            "chunk_ids": source_ids,
+            "chunk_ids": real_chunk_ids,
             "source_type": source_type,
             "claim_text": texts[i],
             "quote": claim.get("quote", "").strip() or None,
@@ -309,7 +326,7 @@ async def process_single_video(api_base_url, vid, source_type):
         if not video_is_relevant:
             return
 
-        extracted_data = await extract_claims(batch_data, source_type, vid)
+        extracted_data, alias_map = await extract_claims(batch_data, source_type, vid)
 
         # Relevance Guard check
         if is_first_batch:
@@ -322,7 +339,7 @@ async def process_single_video(api_base_url, vid, source_type):
                 return
 
         if extracted_data and extracted_data.get("claims"):
-            await save_claims(api_base_url, vid, source_type, extracted_data, batch_data)
+            await save_claims(api_base_url, vid, source_type, extracted_data, batch_data, alias_map)
 
     # Process the first batch sequentially to determine relevance
     first_batch = data[0 : LLM_CHUNK_SIZE]
