@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, GetCoreSchemaHandler
+from pydantic import BaseModel, Field, GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic_core import core_schema
+from pydantic.json_schema import JsonSchemaValue
 from typing import Optional, List, Any
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -16,7 +17,16 @@ class PyObjectId(str):
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
-        return core_schema.no_info_plain_validator_function(cls.validate)
+        return core_schema.no_info_plain_validator_function(
+            cls.validate,
+            json_schema_input_schema=core_schema.str_schema()
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return {"type": "string", "format": "objectid"}
 
     @classmethod
     def validate(cls, v: Any) -> "PyObjectId":
@@ -41,14 +51,14 @@ class MeasurementID(BaseModel):
 
 # ============== Base Models ==============
 
-class Video(BaseModel): 
+class Video(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     youtube_video_id: str = Field(..., unique=True)
     title: str
     thumbnail_url: Optional[str] = None
     channel_id: str
     channel_name: str
-    publish_date: datetime 
+    publish_date: datetime
     league: List[str] = [] # Updated to hold more than 1 string
     teams: List[str] = []
     view_count: int
@@ -57,6 +67,9 @@ class Video(BaseModel):
     duration_seconds: int
     summary: Optional[str] = None
     sentiment_pct: float = 0.0 # Red text requirement: sentiment for trending matches
+    risk_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    risk_breakdown: Optional[dict] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -74,6 +87,9 @@ class Channel(BaseModel):
     latest_title: str      # Derived: Title of most recent video
     latest_views: int      # Derived: Views of most recent video
     active: bool = True    # Red Text: Tracking toggle
+    risk_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    risk_breakdown: Optional[dict] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -136,10 +152,12 @@ class Trend(BaseModel):
     Tactics: int = 0
     Controversy: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 class TrendMeta(BaseModel):
     id: MeasurementID = Field(alias="_id") 
-    value: int
+    value: float
     sentiment: float
 '''
 Treat this class as like a measure for attention and overall sentiment surrounding a topic
