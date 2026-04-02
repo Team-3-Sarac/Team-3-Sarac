@@ -8,10 +8,7 @@ HEALTH_INTERVAL=5
 
 log() { echo "[deploy] $(date '+%H:%M:%S') $*"; }
 
-log "Pulling latest code..."
 cd "$REPO_DIR"
-git fetch origin
-git reset --hard origin/main
 
 log "Stopping existing containers..."
 docker compose -f "$COMPOSE_FILE" down --timeout 30 || true
