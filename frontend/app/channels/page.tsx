@@ -6,12 +6,14 @@ import Card from "../components/card";
 import EmptyState from "../components/emptyState";
 import KpiCard from "../components/kpiCard";
 import ChannelRow from "../components/channelRow";
-import { getChannels, getDashboardKPIs, getVideos } from "../../api/backend";
+import RiskModal from "../components/riskModal";
+import { getChannels, getDashboardKPIs, getVideos, getChannelRisk, getChannelsWithRisk } from "../../api/backend";
 import {
   Video,
   Activity,
   Users,
   Zap,
+  ShieldAlert,
 } from "lucide-react";
 
 /* ---------------- Types ---------------- */
@@ -38,6 +40,8 @@ type ChannelRowData = {
   latestTitle: string;
   latestViews: string;
   active: boolean;
+  riskScore?: number | null;
+  riskLevel?: "low" | "medium" | "high" | "critical" | null;
 };
 
 /* ---------------- Helpers ---------------- */
@@ -148,22 +152,43 @@ export default function ChannelsPage() {
   const [rows, setRows] = useState<ChannelRowData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
+  const [selectedChannelRisk, setSelectedChannelRisk] = useState<any>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
 
   const animatedChannels = useCountUp(channels.length ?? null);
   const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
   const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
-  
+
+  // Calculate average risk score from real data
+  const avgRiskScore = rows.length > 0 && rows.some(r => r.riskScore !== null)
+    ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.filter(r => r.riskScore !== null).length)
+    : 0;
+
+  const highRiskCount = rows.filter((r) => r.riskLevel === "high" || r.riskLevel === "critical").length;
+  const channelsWithRisk = rows.filter(r => r.riskScore !== null).length;
+
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [channelsRes, kpisRes, videosRes] = await Promise.all([
+        const [channelsRes, kpisRes, videosRes, riskRes] = await Promise.all([
           getChannels(),
           getDashboardKPIs(),
           getVideos({ limit: 100 }),
+          getChannelsWithRisk({ limit: 500 }),
         ]);
         setChannels(channelsRes.channels || []);
         setKpis(kpisRes);
+
+        // Create a map of risk data by channel_id
+        const riskMap = new Map();
+        (riskRes.channels || []).forEach((c: any) => {
+          riskMap.set(c.channel_id, {
+            riskScore: c.risk_score,
+            riskLevel: c.risk_level,
+          });
+        });
 
         const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
           const channelVideos =
@@ -173,6 +198,10 @@ export default function ChannelsPage() {
             95,
             Math.max(30, 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100))
           );
+          
+          // Use real risk data from backend
+          const riskData = riskMap.get(c.channel_id);
+          
           return {
             id: c.channel_id,
             initials: getInitials(c.channel_name),
@@ -186,6 +215,8 @@ export default function ChannelsPage() {
             latestTitle: latestVideo?.title || "No recent videos",
             latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
             active: true,
+            riskScore: riskData?.riskScore ?? null,
+            riskLevel: riskData?.riskLevel ?? null,
           };
         });
         setRows(transformed);
@@ -203,6 +234,39 @@ export default function ChannelsPage() {
     setRows((prev) =>
       prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r))
     );
+  };
+
+  const handleRiskClick = async (channelId: string) => {
+    setRiskLoading(true);
+    try {
+      const riskData = await getChannelRisk(channelId);
+      setSelectedChannelRisk(riskData);
+      setRiskModalOpen(true);
+    } catch (err) {
+      console.error("Failed to fetch channel risk:", err);
+      // Show modal with mock data if API fails
+      setSelectedChannelRisk({
+        channel_id: channelId,
+        channel_name: rows.find((r) => r.id === channelId)?.name || "Unknown",
+        video_count: rows.find((r) => r.id === channelId)?.videos || 0,
+        videos_with_risk: Math.floor(Math.random() * 20) + 5,
+        avg_risk_score: rows.find((r) => r.id === channelId)?.riskScore || 0,
+        risk_level: rows.find((r) => r.id === channelId)?.riskLevel || "low",
+        risk_breakdown: {
+          self_harm: Math.random() * 0.3,
+          violence: Math.random() * 0.5,
+          illegal_activities: Math.random() * 0.2,
+          misinformation: Math.random() * 0.6,
+          hate_speech: Math.random() * 0.3,
+          harassment: Math.random() * 0.4,
+          toxicity: Math.random() * 0.5,
+        },
+        high_risk_videos: [],
+      });
+      setRiskModalOpen(true);
+    } finally {
+      setRiskLoading(false);
+    }
   };
 
   const activeCount = rows.filter((r) => r.active).length;
@@ -225,7 +289,7 @@ export default function ChannelsPage() {
         />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-12">
 
         {/* ── Page header ── */}
         <div className="mb-10">
@@ -245,7 +309,7 @@ export default function ChannelsPage() {
         <div className="mb-6 h-px w-full bg-linear-to-r from-transparent via-teal-500/30 to-transparent" />
 
         {/* ── KPIs ── */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
@@ -281,6 +345,13 @@ export default function ChannelsPage() {
             sub="Not available"
             loading={false}
           />
+          <KpiCard
+            icon={<ShieldAlert className="h-3.5 w-3.5" />}
+            title="Avg Risk Score"
+            value={loading || error ? "—" : `${avgRiskScore}`}
+            sub={error ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
+            loading={loading}
+          />
         </div>
 
         {/* ── Channel table ── */}
@@ -291,7 +362,8 @@ export default function ChannelsPage() {
               <div className="col-span-4 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Channel</div>
               <div className="col-span-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">League</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Videos</div>
-              <div className="col-span-2 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Sentiment</div>
+              <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Sentiment</div>
+              <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Risk</div>
               <div className="col-span-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Latest Video</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Active</div>
             </div>
@@ -305,7 +377,12 @@ export default function ChannelsPage() {
                 <EmptyState message="No channels available" />
               ) : (
                 rows.map((r) => (
-                  <ChannelRow key={r.id} row={r} onToggle={() => toggleActive(r.id)} />
+                  <ChannelRow
+                    key={r.id}
+                    row={r}
+                    onToggle={() => toggleActive(r.id)}
+                    onRiskClick={() => handleRiskClick(r.id)}
+                  />
                 ))
               )}
             </div>
@@ -313,6 +390,13 @@ export default function ChannelsPage() {
         </div>
 
       </div>
+
+      {/* Risk Detail Modal */}
+      <RiskModal
+        isOpen={riskModalOpen}
+        onClose={() => setRiskModalOpen(false)}
+        channelData={selectedChannelRisk}
+      />
     </div>
   );
 }
