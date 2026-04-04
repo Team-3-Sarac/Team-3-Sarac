@@ -20,6 +20,7 @@ import uuid
 import httpx
 import numpy as np
 from datetime import datetime, timezone
+from bson import ObjectId
 from openai import AsyncOpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
@@ -244,7 +245,10 @@ async def save_claims(api_base_url, video_id, source_type, extracted_data, origi
         text = claim.get("claim", "").strip()
         if not text: continue
         # Pre-check existence to avoid redundant vectorization
-        exists = await db.claims.find_one({"video_id": video_id, "claim_text": text})
+        exists = await db.claims.find_one({
+            "video_id": ObjectId(video_id) if isinstance(video_id, str) else video_id, 
+            "claim_text": text
+        })
         if exists: continue
         texts.append(text)
         filtered.append(claim)
@@ -297,7 +301,8 @@ async def save_claims(api_base_url, video_id, source_type, extracted_data, origi
 
 async def process_single_video(api_base_url, vid, source_type):
     # Retrieve the actual YouTube ID for link generation
-    video_doc = await db.videos.find_one({"_id": vid}, {"youtube_video_id": 1})
+    v_oid = vid if isinstance(vid, ObjectId) else ObjectId(vid)
+    video_doc = await db.videos.find_one({"_id": v_oid}, {"youtube_video_id": 1})
     yt_id = video_doc.get("youtube_video_id") if video_doc else "Unknown"
     yt_link = f"https://www.youtube.com/watch?v={yt_id}"
 
@@ -366,7 +371,7 @@ async def get_unprocessed_vids(source_collection, source_type):
                 "let": {"vid": "$_id"},
                 "pipeline": [
                     {"$match": {"$expr": {"$and": [
-                        {"$eq": ["$video_id", "$$vid"]},
+                        {"$eq": [{ "$toObjectId": "$video_id" }, { "$toObjectId": "$$vid" }]},
                         {"$eq": ["$source_type", source_type]}
                     ]}}}
                 ],
