@@ -1,22 +1,18 @@
 import os
+import sys
 import json
 import asyncio
 from datetime import datetime, timezone
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from routes.database.database import db
 
 load_dotenv()
 
 # --- Config & Setup ---
-USER = os.getenv("MONGO_ROOT_USERNAME")
-PASS = os.getenv("MONGO_ROOT_PASSWORD")
-HOST = os.getenv("MONGO_HOST", "localhost")
-PORT = os.getenv("MONGO_PORT", "27017")
-DB_NAME = os.getenv("MONGO_DATABASE")
 API_KEY = os.getenv("YOUTUBE_API_KEY")
-
-MONGO_URI = f"mongodb://{USER}:{PASS}@{HOST}:{PORT}/{DB_NAME}?authSource=admin"
 
 def json_serial(obj):
     """JSON serializer for objects not serializable by default json code"""
@@ -35,19 +31,14 @@ def derive_initials(name):
 # --- Core Logic Function ---
 async def fetch_channels_data(channel_ids):
     """
-    Main functionality: Connects to DB, fetches YT metadata,
-    and returns a list of dictionaries.
-
-    Preservation Logic: Checks if the channel already exists in the 'channels'
-    collection to avoid overwriting sentiment data or 'active' status.
+    Main functionality: Uses the imported 'db' instance, fetches YT metadata,
+    and returns a list of dictionaries formatted for the ingest route.
     """
-    mongo_client = AsyncIOMotorClient(MONGO_URI)
-    db = mongo_client[DB_NAME]
     yt_client = get_youtube_client()
 
     async def get_single_channel(channel_id):
         try:
-            # 1. Check for existing record to preserve sentiment/active status
+            # 1. Check for existing record via imported db
             existing_channel = await db.channels.find_one({"channel_id": channel_id})
 
             # 2. YouTube API Fetch
@@ -71,7 +62,7 @@ async def fetch_channels_data(channel_ids):
                 "channel_name": snippet.get("title"),
                 "channel_initials": derive_initials(snippet.get("title")),
                 "handle": snippet.get("customUrl"),
-                "sub_count": stats.get("subscriberCount"), # Rounded string representation
+                "sub_count": int(stats.get("subscriberCount", 0)),
                 "league": channel_videos[0].get("league", []) if channel_videos else [],
                 "video_count": len(channel_videos),
                 "sentiment_pct": existing_channel.get("sentiment_pct", 0.0) if existing_channel else 0.0,
@@ -79,13 +70,8 @@ async def fetch_channels_data(channel_ids):
                 "latest_title": latest_video['title'] if latest_video else "N/A",
                 "latest_views": latest_video['view_count'] if latest_video else 0,
                 "active": existing_channel.get("active", True) if existing_channel else True,
-                "created_at": (
-                    existing_channel["created_at"].isoformat()
-                    if existing_channel and isinstance(existing_channel.get("created_at"), datetime)
-                    else existing_channel.get("created_at") if existing_channel
-                    else datetime.now(timezone.utc).isoformat()
-                ),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "created_at": existing_channel.get("created_at") if existing_channel else datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
             }
         except Exception as e:
             print(f"Error processing channel {channel_id}: {e}")

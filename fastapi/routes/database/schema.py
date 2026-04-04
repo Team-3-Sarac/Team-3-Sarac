@@ -126,8 +126,8 @@ class Claim(BaseModel):
     sentiment_confidence: Optional[float] = None
     sentiment: Optional[str] = None
     sentiment_pct: Optional[float] = None  # The 'score' from LLM
-    risk_level: Optional[str] = None
-    risk_flags: Optional[str] = None
+    risk_score: Optional[float] = None
+    risk_flags: Optional[List[str]] = None
     narrative_category: Optional[str] = None
     mentions: int = 0      # Derived
     leagues: List[str] = [] # Red Text: Store as array

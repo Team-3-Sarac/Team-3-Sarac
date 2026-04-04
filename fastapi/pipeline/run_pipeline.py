@@ -15,8 +15,7 @@ from routes.channel_data import fetch_channels_data
 from routes.ingest_videos import ingest_from_channels, KEYWORDS, EXCLUDE_KEYWORDS
 from routes.youtubeComments import get_comments
 from routes.transcript import get_multi_transcripts
-from pipeline.LLM import run_pipeline as run_llm_extraction
-from pipeline.sentiment import run_pipeline as run_sentiment
+from pipeline.LLM_claim_risk_sentiment import run_pipeline as run_llm_extraction
 from pipeline.narrative_pipeline import run_pipeline as run_narrative_building
 from pipeline.trends_service import calculate_trends
 
@@ -45,18 +44,32 @@ class StageTimer:
             print(f">>> Completed {stage_name} in {duration:.2f} seconds.")
 
     def get_summary(self):
-        print("\n" + "="*40)
-        print("PIPELINE RUNTIME SUMMARY")
-        print("="*40)
-        total_dist = 0
+        header = "PIPELINE RUNTIME SUMMARY"
+        width = 45
+        print(f"\n{'=' * width}")
+        print(f"{header:^{width}}")
+        print(f"{'=' * width}")
+
+        # Pre-calculate total for percentage breakdown
+        total_runtime = sum(
+            (t['end'] - t['start']) for t in self.stages.values() if t['end']
+        )
+
+        if total_runtime == 0:
+            print("No runtime data recorded.")
+            return
+
         for stage, times in self.stages.items():
             if times['end']:
                 diff = times['end'] - times['start']
-                total_dist += diff
-                print(f"{stage:.<30} {diff:>7.2f}s")
-        print("-" * 40)
-        print(f"{'TOTAL RUNTIME':.<30} {total_dist:>7.2f}s")
-        print("="*40)
+                pct = (diff / total_runtime) * 100
+
+                # Format: Stage Name ........... 00.00s (00.0%)
+                print(f"{stage:.<25} {diff:>7.2f}s ({pct:>5.1f}%)")
+
+        print("-" * width)
+        print(f"{'TOTAL RUNTIME':.<25} {total_runtime:>7.2f}s (100.0%)")
+        print(f"{'=' * width}\n")
 
 async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
     timer = StageTimer()
@@ -139,37 +152,29 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
     timer.stop("Phase 4: Content MongoDB Ingestion")
 
     # --- Intelligence Phases (Passing API URL to extractors) ---
-    timer.start("Phase 5: LLM Claim Extraction")
+    timer.start("Phase 5: LLM Claim, Risk, Sentiment Extraction")
     try:
         await run_llm_extraction(api_base_url=api_base_url)
     except Exception as e:
         print(f"FAILED Phase 5: {e}")
     finally:
-        timer.stop("Phase 5: LLM Claim Extraction")
+        timer.stop("Phase 5: LLM Claim, Risk, Sentiment Extraction")
 
-    timer.start("Phase 6: LLM Sentiment Analysis")
-    try:
-        await run_sentiment()
-    except Exception as e:
-        print(f"FAILED Phase 6: {e}")
-    finally:
-        timer.stop("Phase 6: LLM Sentiment Analysis")
-
-    timer.start("Phase 7: LLM Narrative Building")
+    timer.start("Phase 6: LLM Narrative Building")
     try:
         await run_narrative_building(api_base_url=api_base_url)
     except Exception as e:
-        print(f"FAILED Phase 7: {e}")
+        print(f"FAILED Phase 6: {e}")
     finally:
-        timer.stop("Phase 7: LLM Narrative Building")
+        timer.stop("Phase 6: LLM Narrative Building")
 
-    timer.start("Phase 8: Trend Calculation")
+    timer.start("Phase 7: Trend Calculation")
     try:
         await calculate_trends(api_base_url=api_base_url)
     except Exception as e:
-        print(f"FAILED Phase 8: {e}")
+        print(f"FAILED Phase 7: {e}")
     finally:
-        timer.stop("Phase 8: Trend Calculation")
+        timer.stop("Phase 7: Trend Calculation")
 
     timer.get_summary()
     print(f"\n[{datetime.now()}] Pipeline Task Completed.")

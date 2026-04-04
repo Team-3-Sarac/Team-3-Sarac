@@ -133,7 +133,7 @@ def filter_by_views(client, video_ids):
                     "comment_count": int(stats.get("commentCount", 0)),
                     "duration_seconds": parse_duration(item["contentDetails"]["duration"]),
                     "summary": None,
-                    "sentiment_pct": 0.0, # Added for schema compliance
+                    "sentiment_pct": 0.5, # Added for schema compliance
                     "created_at": now,
                     "updated_at": now    # Added for schema compliance
                 })
