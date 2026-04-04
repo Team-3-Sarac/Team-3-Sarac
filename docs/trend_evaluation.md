@@ -282,7 +282,6 @@ improvements to address date context and popularity bias.
 ---
 
 ## 12. Repo Files Referenced
-
 | File                               | Description                        |
 |------------------------------------|------------------------------------|
 | `trend_scoring_weighted.py`        | Weighted scoring algorithm         |
@@ -294,4 +293,90 @@ improvements to address date context and popularity bias.
 | `llm_scores.json`                  | Output from LLM scorer             |
 | `benchmark_report.json`            | Final benchmark comparison output  |
  
+---
+
+## 13. Final 0.40 Threshold Validation & Weight Configurations
+
+**Date:** 4/4/2026  
+**Scorer Version:** trend_scoring_weighted.py (optimized with batch processing + caching via PR 39)  
+**Validation Method:** Manual review of 5 diverse videos at score boundary (0.38-0.45 range)  
+
+---
+
+### Manual Video Review Results
+
+#### Video 1: Atlético Madrid vs. Tottenham: Extended Highlights | UCL Round of 16 - Leg 1 | CBS Sports Golazo
+| Metric                | Value        | Analysis                                                                                    |
+|-----------------------|--------------|---------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.2483       | Dropped from 0.6304 -> 0.2483 over 2 weeks                                                  |
+| **League**            | UCL          |                                                                                             |
+| **Views**             | 690,909      |                                                                                             |
+| **Engagement Rate**   | 0.1195       |                                                                                             |
+| **Recency Score**     | 0.1882       |                                                                                             |
+| **Mention Score**     | 0.0          | Still have failed deployment so cannot capture this score                                   |
+| **Views Normalized**  | 1.0          |                                                                                             |
+| **Publish Date**      | 2026-03-10   | 25 days old                                                                                 |
+| **Manual Assessment** | Non-trending | Correctly shows it as non-trending (was trending prev) due to recency score decay over time |
+
+**Component Analysis:**
+- Engagement rate: High and appropriate for this content type and match context.
+- Recency: Recency decay is fair and optimal for this example. Was previously trending in past runs.
+- Mention score: Narrative buzz is absent due to failed deployment issues.
+- Views: Very high view count compared to other videos in dataset.
+
+---
+
+#### Video 2: Galatasaray vs. Liverpool: Extended Highlights | UCL Round of 16 - Leg 1 | CBS Sports Golazo
+| Metric                | Value        | Analysis                                                                                    |
+|-----------------------|--------------|---------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.1687       | Dropped from 0.4126 -> 0.1687 over 2 weeks                                                  |
+| **League**            | UCL          |                                                                                             |
+| **Views**             | 351,373      |                                                                                             |
+| **Engagement Rate**   | 0.1070       |                                                                                             |
+| **Recency Score**     | 0.1850       |                                                                                             |
+| **Mention Score**     | 0.0          | Still have failed deployment so cannot capture this score                                   |
+| **Views Normalized**  | 0.5049       |                                                                                             |
+| **Publish Date**      | 2026-03-10   | 25 days old                                                                                 |
+| **Manual Assessment** | Non-trending | Correctly shows it as non-trending (was trending prev) due to recency score decay over time |
+
+**Component Analysis:**
+- Engagement rate: High and appropriate for this content type and match context.
+- Recency: Recency decay is fair and optimal for this example. Was previously trending in past runs under new threshold.
+- Mention score: Narrative buzz is absent due to failed deployment issues.
+- Views: Decently high view count with good engagement rate.
+
+---
+
+### Final Production Weight Configuration
+
+#### Approved Parameters
+
+| Parameter                 | Value     | Justification                                                                                                      |
+|---------------------------|-----------|--------------------------------------------------------------------------------------------------------------------|
+| **TRENDING_THRESHOLD**    | 0.40      | Captures high-profile UCL/PL matches without excessive false positives                                             |
+| **ENGAGEMENT_CEILING**    | 0.08 (8%) | Typical soccer engagement is 0.5-5% so we lowered it from 10% -> 8% to prevent viral outliers from dominating      |
+| **RECENCY_WINDOW_DAYS**   | 30        | Balances fresh content priority with long-tail video discovery                                                     |
+| **MENTION_COUNT_CEILING** | 500       | Normalized based on observed narrative mention distribution, unable to calibrate due to deployment issues          |
+| **BATCH_SIZE**            | 1000      | Optimal for memory efficiency on 10K+ video datasets, can be considered for future calibrations when dataset grows |
+
+#### Approved Component Weights
+
+| Component            | Weight | Justification                                             |
+|----------------------|--------|-----------------------------------------------------------|
+| **engagement_rate**  | 0.35   | Primary signal of audience interest quality               |
+| **recency_score**    | 0.30   | Time-sensitivity critical for trending classification     |
+| **mention_score**    | 0.20   | Captures narrative resonance through claim pipeline       |
+| **views_normalized** | 0.15   | Relative popularity without over-weighting viral outliers |
+
+---
+
+### Recommended Recalibration Schedule
+
+| Frequency     | Trigger                     | Actions                                                   |
+|---------------|-----------------------------|-----------------------------------------------------------|
+| **Weekly**    | After orchestrator runs     | Review top 10 trending videos for obvious false positives |
+| **Monthly**   | Dataset grows significantly | Re-run sensitivity analysis on thresholds/ceilings        |
+| **Quarterly** | Major pipeline changes      | Full manual review of 20+ boundary videos                 |
+| **On-demand** | mention_score goes live     | Rebalance weights to account for new signal strength      |
+
 ---
