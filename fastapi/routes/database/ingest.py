@@ -66,30 +66,47 @@ async def _refresh_channel_metadata(channel_ids: list[str]):
 
 @router.post("/channels")
 async def ingest_channels(channels: list[Channel]):
-    """Ingest channel metadata and ensure timestamps are datetime objects."""
+    """
+    Ingest or update channel metadata.
+    Uses the $set/$setOnInsert pattern to preserve original creation dates.
+    """
     if not channels:
         raise HTTPException(status_code=400, detail="Empty channel list")
 
-    docs = []
+    processed_count = 0
     for c in channels:
+        # 1. Convert Pydantic model to dict, using aliases (_id) and excluding Nones
         doc = c.model_dump(by_alias=True, exclude_none=True)
 
-        if isinstance(doc.get("last_updated"), str):
-            doc["updated_at"] = parse_iso(doc["updated_at"])
-        else:
-            doc["updated_at"] = datetime.now(timezone.utc)
+        # 2. Handle Timestamps
+        current_time = datetime.now(timezone.utc)
 
-        if isinstance(doc.get("created_at"), str):
-            doc["created_at"] = parse_iso(doc["created_at"])
-        else:
-            doc["created_at"] = datetime.now(timezone.utc)
+        # Standardize any string dates to datetime objects
+        for field in ["created_at", "updated_at"]:
+            if isinstance(doc.get(field), str):
+                doc[field] = parse_iso(doc[field])
 
-        docs.append(doc)
+        # Pop created_at so we can handle it conditionally via $setOnInsert
+        # If it's missing from the payload, current_time is the fallback
+        initial_date = doc.pop("created_at", current_time)
+        doc["updated_at"] = current_time
 
-    # Use upsert logic or simple insert depending on preference; here we use insert_many
-    # for bulk ingestion from the pipeline.
-    result = await db.channels.insert_many(docs)
-    return {"inserted": len(result.inserted_ids)}
+        # 3. Perform the Upsert
+        # Filter: Unique YouTube channel string ID
+        # $set: Overwrites all metadata with the latest fetch
+        # $setOnInsert: Only applies created_at if the document is brand new
+        await db.channels.update_one(
+            {"channel_id": doc["channel_id"]},
+            {
+                "$set": doc,
+                "$setOnInsert": {"created_at": initial_date}
+            },
+            upsert=True
+        )
+
+        processed_count += 1
+
+    return {"status": "success", "processed": processed_count}
 
 @router.post("/videos")
 async def ingest_videos(videos: list[Video]):
@@ -261,6 +278,9 @@ async def ingest_claims(claims: list[Claim]):
     docs = []
     for c in claims:
         doc = c.model_dump(by_alias=True, exclude_none=True)
+        # Convert video to ObjectId for the db
+        if isinstance(doc.get("video_id"), str):
+            doc["video_id"] = ObjectId(doc["video_id"])
         # Ensure chunk_ids are converted to ObjectIds for the database
         if doc.get("chunk_ids"):
             doc["chunk_ids"] = [ObjectId(cid) if isinstance(cid, str) else cid for cid in doc["chunk_ids"]]
