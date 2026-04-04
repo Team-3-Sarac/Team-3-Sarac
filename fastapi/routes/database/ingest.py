@@ -278,7 +278,7 @@ async def ingest_claims(claims: list[Claim]):
     docs = []
     for c in claims:
         doc = c.model_dump(by_alias=True, exclude_none=True)
-        # Convert video to ObjectId for the db
+        # Now convert video_id to ObjectId for the database
         if isinstance(doc.get("video_id"), str):
             doc["video_id"] = ObjectId(doc["video_id"])
         # Ensure chunk_ids are converted to ObjectIds for the database
