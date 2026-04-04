@@ -27,21 +27,21 @@ Both scorers will be benchmarked against the same dataset. Findings will serve a
 
 ### Formula
 
-`trend_score = (engagement_rate × 0.35) + (recency_score × 0.30) + (comment_quality × 0.20) + (views_normalized × 0.15)`
+`trend_score = (engagement_rate × 0.35) + (recency_score × 0.30) + (mention_score × 0.20) + (views_normalized × 0.15)`
 
-| Component          | Source Fields                               | Description                                                                                                                         |
-|--------------------|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views, normalized against 10% ceiling (can be calibrated down to ~5% depending on data)                        |
-| `recency_score`    | `publish_date`                              | Linear decay over 30 days (1.0 today → 0.0 at 30 days)                                                                              |
-| `comment_quality`  | `comments.like_count`                       | Avg comment like count, normalized against ceiling of 100. Proxy for narrative popularity until `trends.mention_count` is populated |
-| `views_normalized` | `view_count`                                | Min-max normalized across dataset                                                                                                   |
+| Component          | Source Fields                               | Description                                                                                                  |
+|--------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `engagement_rate`  | `like_count`, `comment_count`, `view_count` | (likes + comments) / views, normalized against 10% ceiling (can be calibrated down to ~5% depending on data) |
+| `recency_score`    | `publish_date`                              | Linear decay over 30 days (1.0 today → 0.0 at 30 days)                                                       |
+| `mention_score`    | `trends.mention_count`                      | Reflects how much narrative-level buzz is directly traceable to a video's claims, ceiling of 500             |
+| `views_normalized` | `view_count`                                | Min-max normalized across dataset                                                                            |
 
-**Trending threshold:** `score >= 0.55` can be changed once full dataset is loaded.
+**Trending threshold:** `score >= 0.40` calibrated through manual analysis of the dataset.
 
 **Weight justification:** 
 - The engagement rate (0.35) reflects audience quality over raw reach. 
 - The recency (0.30) reflects time-sensitivity of trending content. 
-- The comment quality (0.20) captures narrative resonance. 
+- The mention score (0.20) captures narrative resonance through the claim -> narrative pipeline. 
 - The views normalization (0.15) adds relative popularity without letting high-view outliers dominate.
 
 ---
@@ -270,11 +270,11 @@ Claim extraction pipeline is under development (LLM Integration Layer task). Onc
 Based on the benchmark results, legitimate high-profile UCL and Premier League matches (Galatasaray vs. Liverpool, 0.41) fall just below the current threshold. 
 Lowering to 0.40 captures these without significantly increasing false positives given the current score distribution.
  
-**Recommendation 2 — Add duration and content-type filter to the ingestion pipeline (INCOMPLETE):**  
+**Recommendation 2 — Add duration and content-type filter to the ingestion pipeline (COMPLETE):**  
 The "It's never too late for success" false positive demonstrates that non-soccer short clips can top the algo rankings. A `duration_seconds >= X` filter and a soccer 
 keyword check during ingestion will address this upstream before scoring runs.
  
-**Recommendation 3 — Proceed with weighted algo as primary scorer (INCOMPLETE):**  
+**Recommendation 3 — Proceed with weighted algo as primary scorer (COMPLETE):**  
 Based on manual analysis of disagreements, the weighted algo produces more accurate trending classifications than the LLM for this dataset. The LLM over-scores content based 
 on team/player name recognition rather than actual engagement signals. The LLM approach is not recommended for production use in its current form without prompt 
 improvements to address date context and popularity bias.

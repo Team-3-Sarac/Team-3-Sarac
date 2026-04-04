@@ -21,6 +21,7 @@ Upsert: After scoring, aggregates average trend_score across all videos linked t
 
 import json
 import os
+import hashlib
 from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
@@ -34,11 +35,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 VIDEOS_PATH = BASE_DIR / "data" / "filtered_videos.json"
 COMMENTS_PATH = BASE_DIR / "data" / "youtubeComments.json"
 OUTPUT_PATH = BASE_DIR / "data" / "weighted_algorithmic_scores.json"
+CACHE_PATH = BASE_DIR / "data" / ".mention_cache.json"
 
 TRENDING_THRESHOLD    = 0.40   # updated to 0.40 from evaluation from week 6
 RECENCY_WINDOW_DAYS   = 30
 ENGAGEMENT_CEILING    = 0.10   # normalize engagement rate against a 10% cap
 MENTION_COUNT_CEILING = 500    # normalize mention count (will tune later during eval)
+BATCH_SIZE = 1000
 
 WEIGHTS = {
     "engagement_rate":  0.35,
@@ -62,10 +65,70 @@ def _build_mongo_uri() -> str:
 
     return f"mongodb://{username}:{password}@{host}:{port}/"
 
+
+# Makes a cache key via hashing the count and timestamp, if the key matches the cached key then we can reuse the data safely
+# Helps avoid expensive joins when the source data actually hasn't changed
+def _compute_mention_cache_key(db) -> str:
+    
+    # Get count of narratives with claims and their last timestamp
+    narratives = list(db["narratives"].find(
+        {"claim_ids": {"$exists": True, "$not": {"$size": 0}}},
+        {"_id": 1, "updated_at": 1}
+    ).sort("updated_at", -1).limit(1))
+    
+    if not narratives:
+        return "empty"
+    
+    # Hash based on narrative count and most recent update timestamp
+    narrative_count = db["narratives"].count_documents({"claim_ids": {"$exists": True, "$not": {"$size": 0}}})
+    latest_update = narratives[0].get("updated_at", datetime.min).isoformat() if narratives else ""
+    
+    cache_string = f"narratives:{narrative_count}:latest:{latest_update}"
+    return hashlib.md5(cache_string.encode()).hexdigest()                   # 128 bit hash (32 char hex string)
+
+
+# Loads cached data if it exists and returns (cache_key, mention_by_video) tuple where cache_key is empty if it doesnt exist
+def _load_mention_cache() -> tuple[str, dict[str, int]]:
+
+    if not CACHE_PATH.exists():
+        return "", {}
+    
+    try:
+        with open(CACHE_PATH, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+            return cache_data.get("cache_key", ""), cache_data.get("mention_by_video", {})
+    except Exception as e:
+        print(f"  [cache] Failed to load cache: {e}")
+        return "", {}
+
+
+# Saves the lookup for future runs and is invalidatied when narratives are updated
+def _save_mention_cache(cache_key: str, mention_by_video: dict[str, int]) -> None:
+
+    try:
+        cache_data = {
+            "cache_key": cache_key,
+            "mention_by_video": mention_by_video,
+            "cached_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        Path(CACHE_PATH).parent.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, indent=2)
+        
+        print(f"  [cache] Saved mention data for {len(mention_by_video)} videos")
+    except Exception as e:
+        print(f"  [cache] Failed to save cache: {e}")
+
+
+# Andy's helper: builds lookup dicts to avoid duplicate DB round-trips
+# Bella additions: Added optimization to build lookup using indexed queries + projection
 def _resolve_join_maps(db) -> tuple[dict[str, list], dict[str, str]]:
     """
-    Shared helper: builds the two lookup dicts used by both _build_mention_by_video
-    and upsert_trend_scores, avoiding duplicate DB round-trips.
+    Optimized helper:
+        - Builds lookup dicts using indexed queries and projection to minimize data transfer
+        - Uses MongoDB indexes on narrative.claim_ids and claim.video_id for faster lookups
+        - Projects only required fields (_id, claim_ids, video_id) to reduce memory footprint
 
     Returns:
         narrative_claims : {str(narrative._id): [claim ObjectIds]}
@@ -77,6 +140,7 @@ def _resolve_join_maps(db) -> tuple[dict[str, list], dict[str, str]]:
     from bson import ObjectId
 
     # Query narratives that have at least one claim
+    # Optimized to get only required fields
     narratives = list(db["narratives"].find(
         {"claim_ids": {"$exists": True, "$not": {"$size": 0}}},
         {"_id": 1, "claim_ids": 1}
@@ -110,7 +174,9 @@ def _resolve_join_maps(db) -> tuple[dict[str, list], dict[str, str]]:
     return narrative_claims, claim_to_video
 
 
-def _build_mention_by_video(db) -> dict[str, int]:
+# Andy's helper: builds a lookup via join and queries narratives directly so it can work before trends exist (cold start bug)
+# Bella additions: Added caching optimization to avoid rebuilding the lookup every time
+def _build_mention_by_video(db, use_cache: bool = True) -> dict[str, int]:
     """
     Builds a {str(video._id): total_mention_count} lookup by joining:
         Narrative.mention_count + Narrative.claim_ids -> Claim.video_id
@@ -120,7 +186,20 @@ def _build_mention_by_video(db) -> dict[str, int]:
 
     A video accumulates mention_count from multiple narratives, so counts are summed.
     """
+
+    # Check cache first to avoid the expensive join operations
+    if use_cache:
+        cache_key = _compute_mention_cache_key(db)
+        cached_key, cached_mentions = _load_mention_cache()
+        
+        if cache_key and cache_key == cached_key:
+            print(f"  [cache hit] Loaded mention data for {len(cached_mentions)} videos from cache")
+            return cached_mentions
+        else:
+            print(f"  [cache miss] Rebuilding mention_by_video from database")
+    
     # Pull mention_count from narratives, not from trends, to avoid cold-start failure
+    # Projects only required fields
     narratives_with_mentions = list(db["narratives"].find(
         {"claim_ids": {"$exists": True, "$not": {"$size": 0}}},
         {"_id": 1, "claim_ids": 1, "mention_count": 1}
@@ -138,6 +217,7 @@ def _build_mention_by_video(db) -> dict[str, int]:
 
     mention_by_video: dict[str, int] = defaultdict(int)
 
+    # Builds the mention count lookup by iterating through narratives
     for narrative in narratives_with_mentions:
         narrative_id   = str(narrative["_id"])
         mention_count  = narrative.get("mention_count", 0)
@@ -148,12 +228,20 @@ def _build_mention_by_video(db) -> dict[str, int]:
             if video_id:
                 mention_by_video[video_id] += mention_count
 
-    print(f"  mention_by_video built: {len(mention_by_video)} videos with narrative mention data")
-    return dict(mention_by_video)
+    result = dict(mention_by_video)
+    print(f"  mention_by_video built: {len(result)} videos with narrative mention data")
+    
+    # Save to cache for next run
+    if use_cache:
+        cache_key = _compute_mention_cache_key(db)
+        _save_mention_cache(cache_key, result)
+    
+    return result
 
 
 # Loads videos, comments, and per-video mention_counts from DB and returns (videos, comments_by_video, mention_by_video, db)
 # NOTE: videos are loaded WITH _id retained so that the video -> claims -> narrative join can match on videos._id after scoring
+# Added projection to reduce memory footprint when loading large video collections
 def _load_from_mongo() -> tuple[list[dict], dict[str, list[dict]], dict[str, int], object]:
 
     try:
@@ -165,21 +253,37 @@ def _load_from_mongo() -> tuple[list[dict], dict[str, list[dict]], dict[str, int
     if not db_name:
         raise EnvironmentError("MONGO_DATABASE must be set in your .env file.")
 
-    client = MongoClient(_build_mongo_uri(), serverSelectionTimeoutMS=5000)
+    # maxPoolSize allows multiple operations to run in parallel without connection bottlenecks
+    # Values chosen for future scalability andd parallelization, not current bottlenecks
+    client = MongoClient(
+        _build_mongo_uri(), 
+        serverSelectionTimeoutMS=5000,
+        maxPoolSize=50,  # Allow up to 50 concurrent connections
+        minPoolSize=10   # Keep 10 connections ready for faster response
+    )
     client.admin.command("ping")
     db = client[db_name]
 
     # Retain _id which is needed for mention join and trend upsert
+    # Load all videos (no projection needed since we use all fields for scoring)
     videos = list(db["videos"].find({}))
+    print(f"  Loaded {len(videos)} videos from MongoDB")
 
-    raw_comments = list(db["comments"].find({}, {"_id": 0}))
+    # Only get required comment fields to reduce memory usage
+    raw_comments = list(db["comments"].find(
+        {},
+        {"_id": 0, "video_id": 1, "like_count": 1, "comment_text": 1}
+    ))
+    
     comments_by_video: dict[str, list] = defaultdict(list)
     for comment in raw_comments:
         key = str(comment.get("video_id", ""))
         comments_by_video[key].append(comment)
+    
+    print(f"  Loaded {len(raw_comments)} comments from MongoDB")
 
-    # Build per-video mention count via full narrative join
-    mention_by_video = _build_mention_by_video(db)
+    # Build per-video mention count via full narrative join (with caching optimization)
+    mention_by_video = _build_mention_by_video(db, use_cache=True)
 
     print(f"Source: MongoDB ({db_name})")
     return videos, comments_by_video, mention_by_video, db
@@ -271,43 +375,45 @@ def compute_views_normalized(video: dict, all_view_counts: list[int]) -> float:
     return (video.get("view_count", 0) - min_v) / (max_v - min_v)
 
 
-# Calc composite trend score for each video
-# Scores all videos and returns the results (list of scored video dicts) and mongo_id_to_score for trend upserrt join
-def score_videos(videos: list[dict], comments_by_video: dict, mention_by_video: dict[str, int],) -> tuple[list[dict], dict[str, float]]:
+# Scores a batch of vids and returns partial results for performance on larger vid datasets
+# Returns batch results and the batches mongo id for scoring
+def _score_video_batch(videos: list[dict], all_view_counts: list[int], mention_by_video: dict[str, int], batch_num: int, total_batches: int) -> tuple[list[dict], dict[str, float]]:
 
-    all_view_counts = [v.get("view_count", 0) for v in videos]
-    results: list[dict] = []
-    mongo_id_to_score: dict[str, float] = {}
+    batch_results: list[dict] = []
+    batch_mongo_id_to_score: dict[str, float] = {}
+    
+    print(f"  Processing batch {batch_num}/{total_batches} ({len(videos)} videos)...")
 
     for video in videos:
         mongo_id_str = str(video.get("_id", ""))
         video_id = video.get("youtube_video_id") or video.get("video_id") or mongo_id_str
 
-        # Compute weighted score componenets
+        # Compute the weighted score components
         engagement_rate = compute_engagement_rate(video)
         recency_score = compute_recency_score(video)
         mention_score = compute_mention_score(mongo_id_str, mention_by_video)
         views_normalized = compute_views_normalized(video, all_view_counts)
 
-        # Compute trend score
+        # Compute the trend score
         trend_score = round(
             WEIGHTS["engagement_rate"] * engagement_rate +
             WEIGHTS["recency_score"] * recency_score +
             WEIGHTS["mention_score"] * mention_score +
             WEIGHTS["views_normalized"] * views_normalized, 4
         )
-        # Stores a lookup of video_id -> trend_score for trend upsert
+        
+        # Store the lookup of video_id -> trend_score for upsert
         if mongo_id_str:
-            mongo_id_to_score[mongo_id_str] = trend_score
+            batch_mongo_id_to_score[mongo_id_str] = trend_score
 
-        # Convert publish_date to string if it's a datetime object
+        # Convert publish_date to string if it's a datetime object for consistency
         publish_date = video.get("publish_date", "")
         if isinstance(publish_date, datetime):
             publish_date = publish_date.isoformat()
 
         # Append fully scored video to output for debugging/analysis
-        results.append({
-            "mongo_id": mongo_id_str, # added mongo id string
+        batch_results.append({
+            "mongo_id": mongo_id_str,
             "video_id": video_id,
             "title": video.get("title", ""),
             "channel_name": video.get("channel_name", ""),
@@ -328,8 +434,51 @@ def score_videos(videos: list[dict], comments_by_video: dict, mention_by_video: 
             "scored_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    # Sort results by trend score descending
+    return batch_results, batch_mongo_id_to_score
+
+
+# Calc composite trend score for each video using batch processing
+# Scores all videos and returns the results (list of scored video dicts) and mongo_id_to_score for trend upsert join
+# Added batch processing for scalability
+def score_videos(videos: list[dict], comments_by_video: dict, mention_by_video: dict[str, int],) -> tuple[list[dict], dict[str, float]]:
+
+    # Pre-compute all view counts once for the entire dataset (needed for normalization across all videos)
+    all_view_counts = [v.get("view_count", 0) for v in videos]
+
+    # If dataset is small (< BATCH_SIZE), process it all at once
+    total_videos = len(videos)
+    
+    if total_videos <= BATCH_SIZE:
+
+        # Small dataset so we can process all at once
+        print(f"  Processing {total_videos} videos in single batch...")
+        results, mongo_id_to_score = _score_video_batch(videos, all_view_counts, mention_by_video, 1, 1)
+    else:
+
+        # Large dataset so process in batches
+        print(f"  Processing {total_videos} videos in batches of {BATCH_SIZE}...")
+        
+        results = []
+        mongo_id_to_score = {}
+        
+        # Calculate # of batches needed
+        total_batches = (total_videos + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        # Process each batch independently
+        for i in range(0, total_videos, BATCH_SIZE):
+            batch_videos = videos[i:i + BATCH_SIZE]
+            batch_num = (i // BATCH_SIZE) + 1
+            
+            batch_results, batch_scores = _score_video_batch(batch_videos, all_view_counts, mention_by_video, batch_num, total_batches)
+            
+            # Aggregate results into final results
+            results.extend(batch_results)
+            mongo_id_to_score.update(batch_scores)
+
+    # Sort all results by trend score desc and return
+    print(f"  Sorting {len(results)} scored videos...")
     results.sort(key=lambda x: x["trend_score"], reverse=True)
+    
     return results, mongo_id_to_score
 
 
@@ -342,8 +491,6 @@ def upsert_trend_scores(mongo_id_to_score: dict[str, float], db) -> None:
     if db is None:
         print("  [skip] No DB connection — skipping trend upsert.")
         return
-
-    from bson import ObjectId
     
     trends = list(db["trends"].find(
         {"narrative_id": {"$exists": True, "$ne": None}},
@@ -401,6 +548,7 @@ def upsert_trend_scores(mongo_id_to_score: dict[str, float], db) -> None:
 
 # Writing scores to JSON for analysis and debugging
 def write_output(results: list[dict]) -> None:
+
     Path(OUTPUT_PATH).parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4, ensure_ascii=False, default=_json_serial)
@@ -414,8 +562,10 @@ def _json_serial(obj):
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
 
+
 # Main entry point of script to load data, score videos, and write output
 def run_trend_scoring(upsert_data: bool = True) -> list[dict]:
+
     print("-- Weighted Trend Scoring Script --")
     print("Loading data...")
 
