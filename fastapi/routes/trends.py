@@ -14,10 +14,11 @@ def _serialize_object_id(oid: ObjectId) -> str:
 
 def _doc_to_trend_out(doc: dict) -> TrendOut:
     """Convert MongoDB trend document to TrendOut schema."""
+    raw_league = doc.get("league")
     return TrendOut(
         id=_serialize_object_id(doc["_id"]),
         narrative_id=str(doc.get("narrative_id", "")),
-        league=doc.get("league"),
+        league=raw_league[0] if isinstance(raw_league, list) else raw_league,
         time_window=doc.get("time_window", "1d"),
         mention_count=doc.get("mention_count", 0),
         trending_direction=doc.get("trending_direction", "stable"),
@@ -29,10 +30,11 @@ def _doc_to_trend_out(doc: dict) -> TrendOut:
 def _doc_to_narrative_out(doc: dict) -> NarrativeOut:
     """Convert MongoDB narrative document to NarrativeOut schema."""
     claims_ids = doc.get("claims_ids", [])
+    raw_league = doc.get("league")
     return NarrativeOut(
         id=_serialize_object_id(doc["_id"]),
         title=doc.get("title", ""),
-        league=doc.get("league"),
+        league=raw_league[0] if isinstance(raw_league, list) else raw_league,
         claims_ids=[str(cid) if isinstance(cid, ObjectId) else str(cid) for cid in claims_ids],
         created_at=doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
     )

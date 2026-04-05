@@ -7,7 +7,6 @@ import KpiCard from "../components/kpiCard";
 import VideoRow from "../components/videoRow";
 import EventRow from "../components/eventRow";
 import LeagueRow from "../components/leagueRow";
-import ClaimRow from "../components/claimRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
 import SentimentChart from "../components/sentimentChart";
@@ -17,7 +16,6 @@ import {
   getVideos,
   getEvents,
   getSentimentHistory,
-  getDashboardClaims,
 } from "../../api/backend";
 
 import {
@@ -27,7 +25,6 @@ import {
   Users,
   Sparkles,
   AlertTriangle,
-  MessageSquare,
 } from "lucide-react";
 
 /* ---------------- Types ---------------- */
@@ -66,16 +63,6 @@ type Event = {
   created_at: string;
 };
 
-type Claim = {
-  id: string;
-  claim_text: string;
-  sentiment?: string | null;
-  sentiment_pct?: number | null;
-  mentions?: number;
-  narrative_category?: string | null;
-  created_at: string;
-};
-
 type SentimentData = {
   week: string;
   positive: number;
@@ -90,14 +77,13 @@ function useCountUp(target: number | null, duration = 1200) {
   useEffect(() => {
     if (target === null) return;
 
-    const finalTarget = target; // TS now knows this is a number
+    const finalTarget = target;
     const startTime = performance.now();
 
     function animate(now: number) {
       const progress = Math.min((now - startTime) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       setValue(Math.floor(eased * finalTarget));
-
       if (progress < 1) requestAnimationFrame(animate);
     }
 
@@ -164,6 +150,7 @@ const leagueCodeMap: Record<string, string> = {
 };
 
 /* ─── Loading skeletons for lists ─── */
+
 function ListSkeleton({ rows = 4 }: { rows?: number }) {
   return (
     <div className="divide-y divide-white/4">
@@ -218,76 +205,85 @@ function LeagueSkeleton({ rows = 5 }: { rows?: number }) {
 ================================================================ */
 
 const ALL_LEAGUES = ["All", "Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
+const FETCH_TIMEOUT_MS = 5000;
 
 export default function DashboardPage() {
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
-  const [claims, setClaims] = useState<Claim[]>([]);
+  const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [kpisError, setKpisError] = useState(false);
   const [leaguesError, setLeaguesError] = useState(false);
   const [videosError, setVideosError] = useState(false);
   const [eventsError, setEventsError] = useState(false);
-  const [claimsError, setClaimsError] = useState(false);
-  const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
   const [sentimentError, setSentimentError] = useState(false);
   const [activeLeague, setActiveLeague] = useState("All");
 
-  const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
-  const animatedTopics = useCountUp(kpis?.trending_topics ?? null);
-  const animatedChannels = useCountUp(kpis?.channels_tracked ?? null);
-  const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
+  const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
+  const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
+  const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
+  const animatedSentiment = useCountUp(kpis?.avg_sentiment     ?? null);
 
   useEffect(() => {
     async function fetchData() {
-      const timeout = (ms: number) =>
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), ms)
-        );
-      const withTimeout = (p: Promise<any>) => Promise.race([p, timeout(5000)]);
-
-      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes, claimsRes] =
-        await Promise.allSettled([
-          withTimeout(getDashboardKPIs()),
-          withTimeout(getLeagueStats()),
-          withTimeout(getVideos({ limit: 10 })),
-          withTimeout(getEvents(5)),
-          withTimeout(getSentimentHistory()),
-          withTimeout(getDashboardClaims(8)),
+      const withTimeout = <T,>(p: Promise<T>, label: string): Promise<T> =>
+        Promise.race([
+          p,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout: ${label}`)), FETCH_TIMEOUT_MS)
+          ),
         ]);
 
-      if (kpiRes.status === "fulfilled") setKpis(kpiRes.value);
-      else setKpisError(true);
+      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes] =
+        await Promise.allSettled([
+          withTimeout(getDashboardKPIs(),           "getDashboardKPIs"),
+          withTimeout(getLeagueStats(),             "getLeagueStats"),
+          withTimeout(getVideos({ limit: 10 }),     "getVideos"),
+          withTimeout(getEvents(5),                 "getEvents"),
+          withTimeout(getSentimentHistory(),        "getSentimentHistory"),
+        ]);
 
-      if (leagueRes.status === "fulfilled")
+      if (kpiRes.status === "fulfilled") {
+        setKpis(kpiRes.value);
+      } else {
+        console.error("[Dashboard] KPIs failed:", kpiRes.reason);
+        setKpisError(true);
+      }
+
+      if (leagueRes.status === "fulfilled") {
         setLeagues(leagueRes.value.leagues || []);
-      else setLeaguesError(true);
+      } else {
+        console.error("[Dashboard] League stats failed:", leagueRes.reason);
+        setLeaguesError(true);
+      }
 
-      if (videoRes.status === "fulfilled")
+      if (videoRes.status === "fulfilled") {
         setVideos(videoRes.value.videos || []);
-      else setVideosError(true);
+      } else {
+        console.error("[Dashboard] Videos failed:", videoRes.reason);
+        setVideosError(true);
+      }
 
-      if (eventsRes.status === "fulfilled")
+      if (eventsRes.status === "fulfilled") {
         setEvents(eventsRes.value.events || []);
-      else setEventsError(true);
-
-      if (claimsRes.status === "fulfilled")
-        setClaims(claimsRes.value.claims || []);
-      else setClaimsError(true);
+      } else {
+        // Events are non-fatal — warn rather than error since the endpoint may not exist
+        console.warn("[Dashboard] Events failed (non-fatal):", eventsRes.reason);
+        setEventsError(true);
+      }
 
       if (sentimentRes.status === "fulfilled") {
         const formatted = (sentimentRes.value.weeks || []).map(
           (w: any, i: number) => ({
             ...w,
-            week:
-              ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7] ||
-              w.week,
+            week: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7] || w.week,
           })
         );
         setSentimentHistory(formatted);
       } else {
+        console.error("[Dashboard] Sentiment history failed:", sentimentRes.reason);
         setSentimentError(true);
       }
 
@@ -296,19 +292,23 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
-  const sentimentTone = kpis
-    ? getSentimentTone(kpis.avg_sentiment)
-    : "neu";
-
+  const sentimentTone = kpis ? getSentimentTone(kpis.avg_sentiment) : "neu";
   const filteredVideos =
     activeLeague === "All"
       ? videos
       : videos.filter((v) => v.league === activeLeague);
 
+  /* ── KPI sub-text helpers (guards against null/error/loading) ── */
+  function kpiSub(errorFlag: boolean, loadedValue: string): string {
+    if (errorFlag) return "Failed to load";
+    if (loading)   return "Loading…";
+    return loadedValue;
+  }
+
   return (
     <div className="relative min-h-screen w-full overflow-x-hidden bg-[#080808] text-white">
 
-      {/* ── Subtle grid background ── */}
+      {/* ── Grid background ── */}
       <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.03]">
         <div
           className="h-full w-full"
@@ -347,28 +347,28 @@ export default function DashboardPage() {
             icon={<Video className="h-3.5 w-3.5" />}
             title="Videos Analyzed"
             value={kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
-            sub={kpisError ? "Failed to load" : kpis ? `+${kpis.videos_this_week} this week` : "Loading…"}
+            sub={kpiSub(kpisError, `+${kpis?.videos_this_week ?? 0} this week`)}
             loading={loading}
           />
           <KpiCard
             icon={<TrendingUp className="h-3.5 w-3.5" />}
             title="Trending Topics"
             value={kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—"}
-            sub={kpisError ? "Failed to load" : kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…"}
+            sub={kpiSub(kpisError, `+${kpis?.topics_since_yesterday ?? 0} since yesterday`)}
             loading={loading}
           />
           <KpiCard
             icon={<Activity className="h-3.5 w-3.5" />}
             title="Avg. Sentiment"
             value={kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—"}
-            sub={kpisError ? "Failed to load" : kpis ? getSentimentLabel(kpis.avg_sentiment) + " overall" : "Loading…"}
+            sub={kpiSub(kpisError, kpis ? getSentimentLabel(kpis.avg_sentiment) + " overall" : "—")}
             loading={loading}
           />
           <KpiCard
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
             value={kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—"}
-            sub={kpisError ? "Failed to load" : leagues.length ? `${leagues.length} leagues` : "Loading…"}
+            sub={kpiSub(kpisError, leagues.length ? `${leagues.length} leagues` : "No leagues")}
             loading={loading}
           />
         </div>
@@ -469,7 +469,13 @@ export default function DashboardPage() {
               ) : videosError ? (
                 <EmptyState message="Failed to load videos" />
               ) : filteredVideos.length === 0 ? (
-                <EmptyState message={activeLeague === "All" ? "No videos available" : `No ${activeLeague} videos available`} />
+                <EmptyState
+                  message={
+                    activeLeague === "All"
+                      ? "No videos available"
+                      : `No ${activeLeague} videos available`
+                  }
+                />
               ) : (
                 filteredVideos.map((video) => (
                   <VideoRow
@@ -504,7 +510,7 @@ export default function DashboardPage() {
               ) : leagues.length === 0 ? (
                 <EmptyState message="No leagues available" />
               ) : (
-              leagues.map((league) => (
+                leagues.map((league) => (
                   <LeagueRow
                     key={league.league}
                     code={
@@ -515,35 +521,6 @@ export default function DashboardPage() {
                     league={league.league}
                     count={league.count.toString()}
                     status={league.status}
-                  />
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
-
-        {/* ── Emerging Claims ── */}
-        <div className="mt-6">
-          <Card>
-            <CardHeader
-              title="Emerging Claims"
-              subtitle="Trending narratives across all channels"
-            />
-            <div className="divide-y divide-white/4">
-              {loading ? (
-                <ListSkeleton />
-              ) : claimsError ? (
-                <EmptyState message="Failed to load claims" />
-              ) : claims.length === 0 ? (
-                <EmptyState message="No claims available" />
-              ) : (
-                claims.map((claim) => (
-                  <ClaimRow
-                    key={claim.id}
-                    text={claim.claim_text}
-                    category={claim.narrative_category}
-                    sentiment={claim.sentiment}
-                    mentions={claim.mentions}
                   />
                 ))
               )}
