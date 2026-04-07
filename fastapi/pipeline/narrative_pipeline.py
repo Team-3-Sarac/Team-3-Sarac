@@ -208,6 +208,16 @@ async def process_cluster(api_base_url, cluster_id, claims):
         )]
     )
 
+    #quality metrics 
+    
+    completeness = len(claims)
+    video_ids = set([c["claim"].get("video_id") for c in claims])
+    consistency = 1 if len(video_ids) == 1 else 0
+
+    avg_confidence = sum(
+         c["claim"].get("confidence", 0) for c in claims
+         ) / len(claims) if claims else 0
+
     # Prepare payload. 
     # API route will handle preserving created_at via $setOnInsert
     narrative_payload = [{
@@ -216,7 +226,13 @@ async def process_cluster(api_base_url, cluster_id, claims):
         "description": intel['description'],
         "claim_ids": [str(c["claim"]["_id"]) for c in claims],
         "embedding_id": centroid_id,
-        "created_at": datetime.now(timezone.utc).isoformat() 
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    # metrics 
+        "metrics": {
+            "completeness": completeness,
+            "consistency": consistency,
+            "avg_confidence": avg_confidence
+        }
     }]
     
     # Send to API Route

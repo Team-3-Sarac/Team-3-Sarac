@@ -92,7 +92,7 @@ def calculate_cosine_similarity(vec1, vec2):
         return 0.0
     return float(dot_product / (norm_a * norm_b))
 
-def init_qdrant_collection(force_reset=False):
+def init_qdrant_collection(force_reset=True):
     if force_reset:
         try:
             qdrant.delete_collection(collection_name=QDRANT_COLLECTION)
@@ -289,13 +289,19 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
 
     claim_vectors = await get_embeddings_batch(texts, str(video_id))
     if not claim_vectors: return
-    embedding_ids = await save_embeddings_batch(texts, claim_vectors)
+    embedding_ids = await save_embeddings_batch(texts, claim_vectors)                  
 
+    #debugging 
+    print(f"[DEBUG] texts={len(texts)}, filtered={len(filtered)}, embeddings={len(embedding_ids)}")
     docs = []
     for i, claim in enumerate(filtered):
         source_aliases = claim.get("source_ids", [])
         real_chunk_ids = [alias_map[alias] for alias in source_aliases if alias in alias_map]
-
+        
+        # fallback if LLM fails to map sources
+        if not real_chunk_ids:
+            real_chunk_ids = [str(original_batch_data[i]["id"])]
+        
         combined_source_text = " ".join([source_map.get(alias, "") for alias in source_aliases]).strip()
         cosine_confidence = 0.0
         if combined_source_text:
@@ -330,7 +336,6 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
             "risk_score": claim.get("risk_score", 0.0),
             "created_at": datetime.now(timezone.utc).isoformat()
         })
-
     if docs:
         result = await call_ingest_route(api_base_url, "/claims", docs)
         if result:
@@ -475,7 +480,16 @@ async def update_global_aggregates():
 
         # look up channel by _id (ObjectId) since ingest_videos stores the ObjectId
         # on videos.channel_id
-        c_oid = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
+        #c_oid = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
+        
+        # if youtube_id it wil skip safely and prevents any crash 
+        from bson.errors import InvalidId
+
+        try:
+           c_oid = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
+        except InvalidId:
+           print(f"[SKIP] Invalid channel_id: {channel_id}")
+           continue
         existing_channel = await db.channels.find_one({"_id": c_oid}, {"sentiment_pct": 1})
         old_pct = existing_channel.get("sentiment_pct") if existing_channel else None
 
@@ -515,7 +529,9 @@ async def run_pipeline(api_base_url="http://localhost:8000/ingest"):
 
     # Run combined aggregates (Risk + Sentiment + Directions)
     await update_global_aggregates()
-
+    
+    from pipeline.data_validation import validate_claims_data
+    await validate_claims_data()
     if total_llm_calls > 0:
         print("\n" + "="*40)
         print("UNIFIED PIPELINE PERFORMANCE REPORT")
