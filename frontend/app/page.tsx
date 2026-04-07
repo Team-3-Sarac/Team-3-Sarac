@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { getDashboardKPIs } from "./../api/backend";
 import { TrendingUp, Video, Activity, Users, Shield, Radio, ChevronRight, Eye, Zap, BarChart2 } from "lucide-react";
 
-/* Live Data */
+/* ---------------- Types ---------------- */
 
 type KPIs = {
   videos_analyzed: number;
@@ -15,6 +15,8 @@ type KPIs = {
   videos_this_week: number;
   topics_since_yesterday: number;
 };
+
+/* ---------------- Helpers ---------------- */
 
 function formatNumber(num: number): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
@@ -28,14 +30,13 @@ function useCountUp(target: number | null, duration = 1200) {
   useEffect(() => {
     if (target === null) return;
 
-    const finalTarget = target; // TS now knows this is a number
+    const finalTarget = target;
     const startTime = performance.now();
 
     function animate(now: number) {
       const progress = Math.min((now - startTime) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       setValue(Math.floor(eased * finalTarget));
-
       if (progress < 1) requestAnimationFrame(animate);
     }
 
@@ -44,6 +45,8 @@ function useCountUp(target: number | null, duration = 1200) {
 
   return value;
 }
+
+/* ---------------- Constants ---------------- */
 
 const FEATURES = [
   {
@@ -84,52 +87,63 @@ const LEAGUES = ["Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"
 
 export default function LandingPage() {
   const [kpis, setKpis] = useState<KPIs | null>(null);
-  const [kpisError, setKpisError] = useState(false)
-  const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
-  const animatedTopics = useCountUp(kpis?.trending_topics ?? null);
-  const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
-  const animatedChannels = useCountUp(kpis?.channels_tracked ?? null);
+  const [kpisError, setKpisError] = useState(false);
+
+  const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
+  const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
+  const animatedSentiment = useCountUp(kpis?.avg_sentiment     ?? null);
+  const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
 
   useEffect(() => {
     getDashboardKPIs()
       .then(setKpis)
-      .catch(() => setKpisError(true));
+      .catch((err) => {
+        console.error("[Landing] Failed to fetch KPIs:", err);
+        setKpisError(true);
+      });
   }, []);
 
-  const LIVE_STATS = [
+  // Derived display values — always respect error state
+  const kpiStats = [
     {
-      label: "Videos Analyzed",
-      value: kpis ? formatNumber(animatedVideos) : "—",
-      delta: kpis ? `+${kpis.videos_this_week} this week` : "Loading...",
+      icon: <Video className="h-3.5 w-3.5" />,
+      title: "Videos Analyzed",
+      value: kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—",
+      sub: kpisError ? "Failed to load" : kpis ? `+${kpis.videos_this_week} this week` : "Loading…",
     },
     {
-      label: "Trending Topics",
-      value: kpis ? formatNumber(animatedTopics) : "—",
-      delta: kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading...",
+      icon: <TrendingUp className="h-3.5 w-3.5" />,
+      title: "Trending Topics",
+      value: kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—",
+      sub: kpisError ? "Failed to load" : kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…",
     },
     {
-      label: "Avg. Sentiment",
-      value: kpis ? `${Math.round(animatedSentiment)}%` : "—",
-      delta: kpis
+      icon: <Activity className="h-3.5 w-3.5" />,
+      title: "Avg. Sentiment",
+      value: kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—",
+      sub: kpisError ? "Failed to load" : kpis
         ? kpis.avg_sentiment >= 60 ? "Positive overall"
         : kpis.avg_sentiment >= 40 ? "Neutral overall"
         : "Negative overall"
-        : "Loading...",
+        : "Loading…",
     },
     {
-      label: "Channels Tracked",
-      value: kpis ? formatNumber(animatedChannels) : "—",
-      delta: `${LEAGUES.length} leagues`,
+      icon: <Users className="h-3.5 w-3.5" />,
+      title: "Channels Tracked",
+      value: kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—",
+      sub: kpisError ? "Failed to load" : `${LEAGUES.length} leagues`,
     },
   ];
 
-  return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-[#black] text-white">
+  const isLoading = !kpisError && kpis === null;
 
-      {/* HERO */}
+  return (
+    <div className="min-h-screen w-full overflow-x-hidden bg-[#080808] text-white">
+
+      {/* ── HERO ── */}
       <section className="relative flex min-h-[92vh] flex-col items-center justify-center overflow-hidden px-6 text-center">
 
-        {/* grid background */}
+        {/* Grid background */}
         <div className="pointer-events-none absolute inset-0 opacity-[0.06]">
           <div
             className="h-full w-full"
@@ -144,18 +158,18 @@ export default function LandingPage() {
           />
         </div>
 
-        {/* Top pill */}
+        {/* Live pill */}
         <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/4 px-4 py-1.5 text-xs text-neutral-400 backdrop-blur-sm">
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-500 shadow-[0_0_8px_#22d3ee]" />
           </span>
-            Live intelligence ·{" "}
-            <span className="text-white font-medium">
-              {kpis ? formatNumber(animatedVideos) : "—"}
-            </span>{" "}
-            videos monitored
-          </div>
+          Live intelligence ·{" "}
+          <span className="text-white font-medium">
+            {kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
+          </span>{" "}
+          videos monitored
+        </div>
 
         {/* Headline */}
         <h1
@@ -189,7 +203,7 @@ export default function LandingPage() {
           </Link>
         </div>
 
-        {/* tiny scroll */}
+        {/* Scroll hint */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 text-[11px] text-neutral-600">
           <span>Scroll to explore</span>
           <div className="h-5 w-px bg-linear-to-b from-neutral-600 to-transparent" />
@@ -200,38 +214,8 @@ export default function LandingPage() {
       <section className="border-y border-white/6 bg-white/2 py-10">
         <div className="mx-auto max-w-6xl px-6">
 
-          {/* KPI Cards */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {[
-              {
-                icon: <Video className="h-3.5 w-3.5" />,
-                title: "Videos Analyzed",
-                value: kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—",
-                sub: kpisError ? "Failed to load" : kpis ? `+${kpis.videos_this_week} this week` : "Loading…",
-              },
-              {
-                icon: <TrendingUp className="h-3.5 w-3.5" />,
-                title: "Trending Topics",
-                value: kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—",
-                sub: kpisError ? "Failed to load" : kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…",
-              },
-              {
-                icon: <Activity className="h-3.5 w-3.5" />,
-                title: "Avg. Sentiment",
-                value: kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—",
-                sub: kpisError ? "Failed to load" : kpis
-                  ? kpis.avg_sentiment >= 60 ? "Positive overall"
-                  : kpis.avg_sentiment >= 40 ? "Neutral overall"
-                  : "Negative overall"
-                  : "Loading…",
-              },
-              {
-                icon: <Users className="h-3.5 w-3.5" />,
-                title: "Channels Tracked",
-                value: kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—",
-                sub: kpisError ? "Failed to load" : `${LEAGUES.length} leagues`,
-              },
-            ].map((stat) => (
+            {kpiStats.map((stat) => (
               <div
                 key={stat.title}
                 className="flex flex-col gap-3 rounded-xl border border-white/[0.07] bg-[#0f0f0f] p-6"
@@ -244,7 +228,7 @@ export default function LandingPage() {
                     {stat.icon}
                   </div>
                 </div>
-                {!kpisError && kpis === null ? (
+                {isLoading ? (
                   <>
                     <div className="h-8 w-24 animate-pulse rounded bg-white/4" />
                     <div className="h-3 w-32 animate-pulse rounded bg-white/4" />
@@ -306,7 +290,7 @@ export default function LandingPage() {
             {FEATURES.map((f, i) => (
               <div
                 key={i}
-                className="group flex flex-col gap-4 bg-[#black] p-7 transition-all hover:bg-white/5 hover:shadow-[0_0_20px_rgba(34,211,238,0.1)]"
+                className="group flex flex-col gap-4 bg-[#080808] p-7 transition-all hover:bg-white/5 hover:shadow-[0_0_20px_rgba(34,211,238,0.1)]"
               >
                 <div className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-neutral-400 transition-colors group-hover:border-white/15 group-hover:bg-white/7 group-hover:text-white">
                   {f.icon}

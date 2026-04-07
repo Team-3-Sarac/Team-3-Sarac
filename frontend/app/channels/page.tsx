@@ -52,14 +52,13 @@ function useCountUp(target: number | null, duration = 1200) {
   useEffect(() => {
     if (target === null) return;
 
-    const finalTarget = target; // TS now knows this is a number
+    const finalTarget = target;
     const startTime = performance.now();
 
     function animate(now: number) {
       const progress = Math.min((now - startTime) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       setValue(Math.floor(eased * finalTarget));
-
       if (progress < 1) requestAnimationFrame(animate);
     }
 
@@ -105,12 +104,6 @@ function getMostCommonLeague(videos: any[]): string {
   return sorted[0]?.[0] || "Multi-League";
 }
 
-function getSentimentLabel(pct: number): string {
-  if (pct >= 60) return "Positive";
-  if (pct >= 40) return "Neutral";
-  return "Negative";
-}
-
 /* ---------------- Table Skeleton ---------------- */
 
 function TableSkeleton({ rows = 6 }: { rows?: number }) {
@@ -151,57 +144,69 @@ export default function ChannelsPage() {
   const [kpis, setKpis] = useState<{ videos_analyzed: number; avg_sentiment: number } | null>(null);
   const [rows, setRows] = useState<ChannelRowData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [channelsError, setChannelsError] = useState(false);
+  const [kpisError, setKpisError] = useState(false);
   const [riskModalOpen, setRiskModalOpen] = useState(false);
   const [selectedChannelRisk, setSelectedChannelRisk] = useState<any>(null);
   const [riskLoading, setRiskLoading] = useState(false);
 
-  const animatedChannels = useCountUp(channels.length ?? null);
-  const animatedVideos = useCountUp(kpis?.videos_analyzed ?? null);
+  const animatedChannels  = useCountUp(channels.length > 0 ? channels.length : null);
+  const animatedVideos    = useCountUp(kpis?.videos_analyzed ?? null);
   const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
 
-  // Calculate average risk score from real data
   const avgRiskScore = rows.length > 0 && rows.some(r => r.riskScore !== null)
     ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.filter(r => r.riskScore !== null).length)
     : 0;
 
-  const highRiskCount = rows.filter((r) => r.riskLevel === "high" || r.riskLevel === "critical").length;
   const channelsWithRisk = rows.filter(r => r.riskScore !== null).length;
-
 
   useEffect(() => {
     async function fetchData() {
-      try {
-        const [channelsRes, kpisRes, videosRes, riskRes] = await Promise.all([
-          getChannels(),
-          getDashboardKPIs(),
-          getVideos({ limit: 100 }),
-          getChannelsWithRisk({ limit: 500 }),
-        ]);
-        setChannels(channelsRes.channels || []);
-        setKpis(kpisRes);
+      const [channelsRes, kpisRes, videosRes, riskRes] = await Promise.allSettled([
+        getChannels(),
+        getDashboardKPIs(),
+        getVideos({ limit: 100 }),
+        getChannelsWithRisk({ limit: 500 }),
+      ]);
 
-        // Create a map of risk data by channel_id
-        const riskMap = new Map();
-        (riskRes.channels || []).forEach((c: any) => {
-          riskMap.set(c.channel_id, {
-            riskScore: c.risk_score,
-            riskLevel: c.risk_level,
+      // KPIs — non-fatal, shown in KPI cards only
+      if (kpisRes.status === "fulfilled") {
+        setKpis(kpisRes.value);
+      } else {
+        console.error("[Channels] Failed to fetch KPIs:", kpisRes.reason);
+        setKpisError(true);
+      }
+
+      // Channels + videos + risk — all needed to build rows
+      if (
+        channelsRes.status === "fulfilled" &&
+        videosRes.status === "fulfilled"
+      ) {
+        const channelList: Channel[] = channelsRes.value.channels || [];
+        setChannels(channelList);
+
+        const riskMap = new Map<string, { riskScore: number; riskLevel: string }>();
+        if (riskRes.status === "fulfilled") {
+          (riskRes.value.channels || []).forEach((c: any) => {
+            riskMap.set(c.channel_id, {
+              riskScore: c.risk_score,
+              riskLevel: c.risk_level,
+            });
           });
-        });
+        } else {
+          console.warn("[Channels] Failed to fetch risk data (non-fatal):", riskRes.reason);
+        }
 
-        const transformed: ChannelRowData[] = (channelsRes.channels || []).map((c: Channel) => {
+        const transformed: ChannelRowData[] = channelList.map((c: Channel) => {
           const channelVideos =
-            videosRes.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
+            videosRes.value.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
           const latestVideo = channelVideos[0];
           const avgSentiment = Math.min(
             95,
             Math.max(30, 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100))
           );
-          
-          // Use real risk data from backend
           const riskData = riskMap.get(c.channel_id);
-          
+
           return {
             id: c.channel_id,
             initials: getInitials(c.channel_name),
@@ -216,17 +221,24 @@ export default function ChannelsPage() {
             latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
             active: true,
             riskScore: riskData?.riskScore ?? null,
-            riskLevel: riskData?.riskLevel ?? null,
+            riskLevel: (riskData?.riskLevel ?? null) as ChannelRowData["riskLevel"],
           };
         });
+
         setRows(transformed);
-      } catch (err) {
-        console.error("Failed to fetch channels data:", err);
-        setError(true);
-      } finally {
-        setLoading(false);
+      } else {
+        if (channelsRes.status === "rejected") {
+          console.error("[Channels] Failed to fetch channels:", channelsRes.reason);
+        }
+        if (videosRes.status === "rejected") {
+          console.error("[Channels] Failed to fetch videos:", videosRes.reason);
+        }
+        setChannelsError(true);
       }
+
+      setLoading(false);
     }
+
     fetchData();
   }, []);
 
@@ -313,28 +325,29 @@ export default function ChannelsPage() {
           <KpiCard
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
-            value={error ? "—" : formatNumber(animatedChannels)}
-            sub={error ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
+            value={channelsError ? "—" : formatNumber(animatedChannels)}
+            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
             loading={loading}
           />
           <KpiCard
             icon={<Video className="h-3.5 w-3.5" />}
             title="Total Videos"
-            value={error ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
-            sub={error ? "Failed to load" : "Across all tracked channels"}
+            value={kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
+            sub={kpisError ? "Failed to load" : loading ? "Loading…" : "Across all tracked channels"}
             loading={loading}
           />
           <KpiCard
             icon={<Activity className="h-3.5 w-3.5" />}
             title="Avg. Sentiment"
-            value={loading || !kpis ? "—" : `${Math.round(animatedSentiment)}%`}
+            value={kpisError || !kpis ? "—" : `${Math.round(animatedSentiment)}%`}
             sub={
-              error ? "Failed to load" :
+              kpisError ? "Failed to load" :
+              loading ? "Loading…" :
               kpis
                 ? kpis.avg_sentiment >= 60 ? "Positive overall"
                 : kpis.avg_sentiment >= 40 ? "Neutral overall"
                 : "Negative overall"
-                : "Loading…"
+                : "—"
             }
             loading={loading}
           />
@@ -343,13 +356,13 @@ export default function ChannelsPage() {
             title="API Quota Used"
             value="N/A"
             sub="Not available"
-            loading={false}
+            loading={loading}
           />
           <KpiCard
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
             title="Avg Risk Score"
-            value={loading || error ? "—" : `${avgRiskScore}`}
-            sub={error ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
+            value={loading || channelsError ? "—" : `${avgRiskScore}`}
+            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
             loading={loading}
           />
         </div>
@@ -371,7 +384,7 @@ export default function ChannelsPage() {
             <div className="divide-y divide-white/4">
               {loading ? (
                 <TableSkeleton />
-              ) : error ? (
+              ) : channelsError ? (
                 <EmptyState message="Failed to load channels" />
               ) : rows.length === 0 ? (
                 <EmptyState message="No channels available" />
