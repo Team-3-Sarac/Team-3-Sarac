@@ -3,7 +3,7 @@ import { join } from "path";
 
 const nextConfig: NextConfig = {
   turbopack: {
-    root: join(process.cwd())
+    root: process.cwd()
   }
 };
 
