@@ -1,10 +1,5 @@
 import type { NextConfig } from "next";
-import { join } from "path";
 
-const nextConfig: NextConfig = {
-  turbopack: {
-    root: process.cwd()
-  }
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
