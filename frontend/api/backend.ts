@@ -1,3 +1,8 @@
+// Frontend API layer
+// All fetch calls to backend are defined here.
+// Page and chart components import from this file rather than calling fetch() directly.
+// Endpoints are defined in backend at ingest.py and trends.py.
+
 const API_BASE = "http://127.0.0.1:8000";
 
 /* ---------------- helpers ---------------- */
