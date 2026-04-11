@@ -147,10 +147,11 @@ class Trend(BaseModel):
     trending_direction: str
     last_updated: datetime
     # Trend category counts for dashboard graphs
-    Transfers: int = 0
-    Injuries: int = 0
-    Tactics: int = 0
-    Controversy: int = 0
+    transfers: int = 0
+    injuries: int = 0
+    tactics: int = 0
+    controversy: int = 0
+    other: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -212,6 +213,10 @@ class VideoOut(BaseModel):
     comment_count: int
     duration_seconds: int
     summary: Optional[str] = None
+    sentiment_pct: float = 0.0 # Red text requirement: sentiment for trending matches
+    risk_score: Optional[float] = None
+    risk_level: Optional[str] = None
+    risk_breakdown: Optional[dict] = None
     created_at: str
 
 
@@ -240,30 +245,39 @@ class TrendOut(BaseModel):
     id: Optional[str] = None
     narrative_id: str
     league: Optional[str] = None
-    time_window: str
+    # time_window: str
     mention_count: int
     trending_direction: str
     score: float
+    change_pct: float = 0.0
+    transfers: int = 0
+    injuries: int = 0
+    tactics: int = 0
+    controversy: int = 0
+    other: int = 0
     created_at: str
+    updated_at: str
 
 
 class NarrativeOut(BaseModel):
     id: str
     title: str
+    description: Optional[str] = None
     league: Optional[str] = None
     claims_ids: list[str]
     created_at: str
+    updated_at: str
 
 
 class ClaimOut(BaseModel):
     id: str
-    narrative_id: str
     text: str
     video_id: str
     created_at: str
     mention_count: Optional[int] = None
     confidence: Optional[float] = None
     sentiment: Optional[str] = None
+    source_type: str
 
 
 # ============== Dashboard Aggregated Schemas ==============
