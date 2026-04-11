@@ -253,8 +253,10 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
     leagues_raw = extracted_data.get("detected_leagues", "Unknown")
     leagues_list = [l.strip() for l in leagues_raw.split(",") if l.strip()]
 
+    v_oid = ObjectId(video_id) if isinstance(video_id, str) else video_id
+
     await db.videos.update_one(
-        {"_id": video_id},
+        {"_id": v_oid},
         {"$set": {
             "risk_score": safety.get("overall_risk_score"),
             "risk_level": safety.get("risk_level", "low"),
@@ -271,16 +273,17 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
     # Build source text lookup keyed by alias (e.g. "id1") to match LLM source_ids
     source_map = {f"id{i+1}": item["text"] for i, item in enumerate(original_batch_data)}
 
+    existing_texts = {
+        doc["claim_text"] async for doc in db.claims.find(
+            {"video_id": v_oid},
+            {"claim_text": 1}
+        )
+    }
+
     texts, filtered = [], []
     for claim in raw_claims:
         text = claim.get("claim", "").strip()
-        if not text:
-            continue
-        exists = await db.claims.find_one({
-            "video_id": ObjectId(video_id) if isinstance(video_id, str) else video_id,
-            "claim_text": text
-        })
-        if exists:
+        if not text or text in existing_texts:
             continue
         texts.append(text)
         filtered.append(claim)
@@ -362,11 +365,12 @@ async def process_single_video(api_base_url, vid, source_type):
         "source_type": source_type
     }
 
+    v_oid = ObjectId(vid) if isinstance(vid, str) else vid
     if source_type == "transcript":
-        cursor = db.transcript_chunks.find({"video_id": vid}).sort("chunk_index", 1)
+        cursor = db.transcript_chunks.find({"video_id": v_oid}).sort("chunk_index", 1)
         data = [{"id": str(c["_id"]), "text": c.get("text", "")} async for c in cursor]
     else:
-        cursor = db.comments.find({"video_id": vid})
+        cursor = db.comments.find({"video_id": v_oid})
         data = [{"id": str(c["_id"]), "text": c.get("comment_text", "")} async for c in cursor]
 
     if not data:
@@ -385,6 +389,25 @@ async def process_single_video(api_base_url, vid, source_type):
         if is_first_batch:
             if not extracted_data.get("is_soccer_related", True):
                 video_is_relevant = False
+                yt_id = video_doc.get("youtube_video_id")
+
+                # Add to Blacklist
+                await db.blacklisted_videos.update_one(
+                    {"youtube_video_id": yt_id},
+                    {"$set": {"reason": "Non-Soccer", "blacklisted_at": datetime.now(timezone.utc)}},
+                    upsert=True
+                )
+
+                # ensure vid is objectId
+                v_oid = ObjectId(vid) if isinstance(vid, str) else vid
+                # Cascading Delete
+                # Remove from videos, comments, and transcript_chunks
+                await db.videos.delete_one({"_id": v_oid})
+                await db.comments.delete_many({"video_id": v_oid})
+                await db.transcript_chunks.delete_many({"video_id": v_oid})
+
+                print(f"[BLACKLISTED & REMOVED] {yt_link}: {metadata['title']}")
+
                 if source_type == "transcript":
                     async with skipped_lock: skipped_videos.add(vid)
                 return
