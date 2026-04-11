@@ -337,7 +337,7 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
             "created_at": datetime.now(timezone.utc).isoformat()
         })
     if docs:
-        result = await call_ingest_route(api_base_url, "/claims", docs)
+        result = await call_ingest_route(api_base_url, "/ingest/claims", docs)
         if result:
             print(f"[Saved via API] {result.get('inserted', 0)} claims for {video_id} | Avg Conf: {np.mean([d['confidence'] for d in docs]):.2f}")
 
@@ -511,7 +511,7 @@ async def update_global_aggregates():
         )
         print(f"  [Channel] Updated {channel_id}: risk={round(risk, 2)} ({risk_level}), sentiment={new_avg_sentiment} ({sentiment_dir})")
 
-async def run_pipeline(api_base_url="http://localhost:8000/ingest"):
+async def run_pipeline(api_base_url="http://localhost:8000"):
     global total_videos
     init_qdrant_collection()
 
