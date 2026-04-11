@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query
+from pymongo import UpdateOne
 from bson import ObjectId
 from .database import db
 from .schema import (
@@ -226,6 +227,9 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
     upserted = 0
     modified = 0
 
+    BULK_BATCH_SIZE = 500
+    operations = []
+
     for t in transcripts:
         oid = lookup.get(t.video_id)
         if oid is None:
@@ -233,7 +237,7 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
             continue
 
         for idx, seg in enumerate(t.transcript):
-            result = await db.transcript_chunks.update_one(
+            operations.append(UpdateOne(
                 {"video_id": oid, "chunk_index": idx},
                 {"$set": {
                     "text": seg.text,
@@ -242,11 +246,14 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
                     "updated_at": now,
                 }, "$setOnInsert": {"created_at": now}},
                 upsert=True
-            )
-            if result.upserted_id:
-                upserted += 1
-            else:
-                modified += result.modified_count
+            ))
+
+    # Execute in batches to avoid exceeding MongoDB's 100k ops-per-batch limit
+    for i in range(0, len(operations), BULK_BATCH_SIZE):
+        batch = operations[i:i + BULK_BATCH_SIZE]
+        result = await db.transcript_chunks.bulk_write(batch, ordered=False)
+        upserted += result.upserted_count
+        modified += result.modified_count
 
     resp = {"upserted": upserted, "modified": modified}
     if skipped:
