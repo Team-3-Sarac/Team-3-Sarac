@@ -110,13 +110,17 @@ async def ingest_channels(channels: list[Channel]):
 
 @router.post("/videos")
 async def ingest_videos(videos: list[Video]):
-    """Ingest video metadata into the database and link to channels."""
+    """Ingest video metadata into the database and link to channels.
+       Updated to use upsert logic.
+    """
     if not videos:
         raise HTTPException(status_code=400, detail="Empty video list")
 
     channel_lookup = await _build_channel_id_lookup()
-    docs = []
-    
+
+    upserted = 0
+    modified = 0
+
     for v in videos:
         doc = v.model_dump(by_alias=True, exclude_none=True)
         # Resolve channel_id to its MongoDB ObjectId if it exists
@@ -133,23 +137,39 @@ async def ingest_videos(videos: list[Video]):
         if isinstance(doc.get("created_at"), str):
             doc["created_at"] = parse_iso(doc["created_at"])
 
-        docs.append(doc)
+        doc["updated_at"] = datetime.now(timezone.utc)
 
-    result = await db.videos.insert_many(docs)
+        initial_date = doc.pop("created_at", datetime.now(timezone.utc))
+        result = await db.videos.update_one(
+            {"youtube_video_id": doc["youtube_video_id"]},
+            {
+                "$set": doc,
+                "$setOnInsert": {"created_at": initial_date}
+            },
+            upsert=True
+        )
+        if result.upserted_id:
+            upserted += 1
+        else:
+            modified += result.modified_count
 
     affected_channels = list(set([v.channel_id for v in videos]))
     await _refresh_channel_metadata(affected_channels)
 
-    return {"inserted": len(result.inserted_ids)}
+    return {"upserted": upserted, "modified": modified}
+
 
 @router.post("/comments")
 async def ingest_comments(comments: list[Comment]):
-    """Ingest user comments and link them to video ObjectIds."""
+    """Ingest user comments and link them to video ObjectIds.
+       Updated to use upsert logic.
+    """
     if not comments:
         raise HTTPException(status_code=400, detail="Empty comment list")
 
     lookup = await _build_video_id_lookup()
-    docs = []
+    upserted = 0
+    modified = 0
     skipped = []
 
     for c in comments:
@@ -163,38 +183,48 @@ async def ingest_comments(comments: list[Comment]):
 
         doc = c.model_dump(by_alias=True, exclude_none=True)
         doc["video_id"] = oid
-        
+
+        now = datetime.now(timezone.utc)
         # Convert created_at/publish_date strings to datetime
         if isinstance(doc.get("created_at"), str):
             doc["created_at"] = parse_iso(doc["created_at"])
         if isinstance(doc.get("publish_date"), str):
             doc["publish_date"] = parse_iso(doc["publish_date"])
-            
-        docs.append(doc)
 
-    inserted = 0
-    if docs:
-        result = await db.comments.insert_many(docs)
-        inserted = len(result.inserted_ids)
+        doc.pop("created_at", None)
+        result = await db.comments.update_one(
+            {"youtube_comment_id": doc["youtube_comment_id"]},
+            {
+                "$set": doc,
+                "$setOnInsert": {"created_at": now}
+            },
+            upsert=True
+        )
 
-    resp = {"inserted": inserted}
+        if result.upserted_id:
+            upserted += 1
+        else:
+            modified += result.modified_count
+
+    resp = {"upserted": upserted, "modified": modified}
     if skipped:
-        unique_skipped = list(set(skipped))
-        resp["skipped_video_ids"] = unique_skipped
-        resp["skipped_count"] = len(skipped)
+        resp["skipped_video_ids"] = list(set(skipped))
     return resp
 
 @router.post("/transcripts")
 async def ingest_transcripts(transcripts: list[TranscriptIn]):
-    """Process and store transcript segments linked to videos."""
+    """Process and store transcript segments linked to videos.
+       Updated to use upsert logic.
+    """
     if not transcripts:
         raise HTTPException(status_code=400, detail="Empty transcript list")
 
     lookup = await _build_video_id_lookup()
     now = datetime.now(timezone.utc)
 
-    docs = []
     skipped = []
+    upserted = 0
+    modified = 0
 
     for t in transcripts:
         oid = lookup.get(t.video_id)
@@ -203,21 +233,22 @@ async def ingest_transcripts(transcripts: list[TranscriptIn]):
             continue
 
         for idx, seg in enumerate(t.transcript):
-            docs.append({
-                "video_id": oid,
-                "chunk_index": idx,
-                "text": seg.text,
-                "start_time_seconds": int(seg.start),
-                "end_time_seconds": int(seg.start + seg.duration),
-                "created_at": now,
-            })
+            result = await db.transcript_chunks.update_one(
+                {"video_id": oid, "chunk_index": idx},
+                {"$set": {
+                    "text": seg.text,
+                    "start_time_seconds": int(seg.start),
+                    "end_time_seconds": int(seg.start + seg.duration),
+                    "updated_at": now,
+                }, "$setOnInsert": {"created_at": now}},
+                upsert=True
+            )
+            if result.upserted_id:
+                upserted += 1
+            else:
+                modified += result.modified_count
 
-    inserted = 0
-    if docs:
-        result = await db.transcript_chunks.insert_many(docs)
-        inserted = len(result.inserted_ids)
-
-    resp = {"inserted": inserted}
+    resp = {"upserted": upserted, "modified": modified}
     if skipped:
         resp["skipped_video_ids"] = list(set(skipped))
     return resp
@@ -246,24 +277,39 @@ async def ingest_narratives(narratives: list[Narrative]):
         initial_date = doc.pop("created_at", current_time)
         doc["updated_at"] = current_time
 
-        # 1. Update the Narrative (Upsert logic)
+        # We query by narrative_label to find the existing document for comparison
+        old_narrative = await db.narratives.find_one({"narrative_label": doc["narrative_label"]})
+
+        # get existing claims_id list from corresponding narrative
+        existing_claim_ids = set(old_narrative.get("claim_ids", [])) if old_narrative else set()
+
+        # Convert incoming string IDs to BSON ObjectIds for the DB
+        incoming_claim_ids = [ObjectId(cid) for cid in doc.get("claim_ids", [])]
+        # Only increment claims that are NOT already linked to this specific narrative
+        new_claims_to_increment = [cid for cid in incoming_claim_ids if cid not in existing_claim_ids]
+
+        if new_claims_to_increment:
+            await db.claims.update_many(
+                {"_id": {"$in": new_claims_to_increment}},
+                {"$inc": {"mentions": 1}}
+            )
+
+        # Upsert Narrative
+        # We remove claim_ids from the $set document because we handle them
+        # specifically with $addToSet to prevent duplicates.
+        doc.pop("claim_ids", None)
+
         await db.narratives.update_one(
             {"narrative_label": doc["narrative_label"]},
             {
                 "$set": doc,
+                "$addToSet": {
+                    "claim_ids": {"$each": incoming_claim_ids}
+                },
                 "$setOnInsert": {"created_at": initial_date}
             },
             upsert=True
         )
-
-        # 2. Increment mentions in the Claims collection
-        # We convert string IDs from the payload into BSON ObjectIds
-        claim_ids = [ObjectId(cid) for cid in doc.get("claim_ids", [])]
-        if claim_ids:
-            await db.claims.update_many(
-                {"_id": {"$in": claim_ids}},
-                {"$inc": {"mentions": 1}}
-            )
 
         processed_count += 1
 
@@ -308,15 +354,28 @@ async def ingest_trends(trends: list[Trend]):
         doc = t.model_dump(by_alias=True, exclude_none=True)
         current_time = datetime.now(timezone.utc)
 
-        if isinstance(doc.get("updated_at"), str):
-            doc["updated_at"] = parse_iso(doc["updated_at"])
+        # Standardize incoming date strings
+        for field in ["created_at", "updated_at", "last_updated"]:
+            if isinstance(doc.get(field), str):
+                doc[field] = parse_iso(doc[field])
+
+        # Get the previous 'updated_at'
+        # We query by _id since Trends have a stable ID generated by the orchestrator
+        existing_trend = await db.trends.find_one({"_id": doc["_id"]})
+
+        if existing_trend and "updated_at" in existing_trend:
+            # Set last_updated to the timestamp of the PREVIOUS run
+            doc["last_updated"] = existing_trend["updated_at"]
         else:
-            doc["updated_at"] = current_time
+            # If it's a brand new trend, last_updated set to current time
+            doc["last_updated"] = current_time
 
         # Pull created_at out of $set so it is only written on first insert
         initial_date = doc.pop("created_at", current_time)
         if isinstance(initial_date, str):
             initial_date = parse_iso(initial_date)
+
+        doc["updated_at"] = current_time
 
         # Upsert on _id, same pattern as ingest_narratives
         await db.trends.update_one(
@@ -422,7 +481,7 @@ def _doc_to_video_out(doc: dict) -> VideoOut:
         video_id=doc["youtube_video_id"],
         title=doc["title"],
         thumbnail_url=doc.get("thumbnail_url"),
-        channel_id=doc["channel_id"],
+        channel_id=str(doc["channel_id"]),
         channel_name=doc.get("channel_name", ""),
         publish_date=doc["publish_date"].isoformat() if isinstance(doc["publish_date"], datetime) else doc["publish_date"],
         league=league,
@@ -432,6 +491,10 @@ def _doc_to_video_out(doc: dict) -> VideoOut:
         comment_count=doc.get("comment_count", 0),
         duration_seconds=doc.get("duration_seconds", 0),
         summary=doc.get("summary"),
+        sentiment_pct=doc.get("sentiment_pct", 0.5),
+        risk_score=doc.get("risk_score", 0),
+        risk_level=doc.get("risk_level", "low"),
+        risk_breakdown=doc.get("risk_breakdown"),
         created_at=doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else doc["created_at"],
     )
 
@@ -673,7 +736,7 @@ async def get_channels():
     channels = []
     async for doc in db.videos.aggregate(pipeline):
         channels.append({
-            "channel_id": doc["_id"],
+            "channel_id": str(doc["_id"]),
             "channel_name": doc["channel_name"],
             "video_count": doc["video_count"],
             "total_views": doc["total_views"],
