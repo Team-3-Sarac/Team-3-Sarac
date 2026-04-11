@@ -19,7 +19,7 @@ export default function Navbar() {
       <div className="h-px w-full bg-linear-to-r from-transparent via-teal-500/40 to-transparent" />
 
       <div className="border-b border-white/6 bg-[#080808]/80 backdrop-blur-2xl">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
 
           {/* Logo */}
           <Link

@@ -322,7 +322,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-12">
 
         {/* ── Page header ── */}
         <div className="mb-10">
@@ -378,7 +378,7 @@ export default function DashboardPage() {
           <Card className="lg:col-span-2 flex flex-col">
             <CardHeader
               title="Sentiment Trend"
-              subtitle="Weekly fan sentiment across all leagues"
+              subtitle="Weekly fan sentiment across all videos"
               right={
                 <div className="flex items-center gap-4 text-[11px] text-neutral-500">
                   <span className="flex items-center gap-1.5">

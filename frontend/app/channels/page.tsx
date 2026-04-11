@@ -5,6 +5,7 @@ import SectionLabel from "../components/sectionLabel";
 import Card from "../components/card";
 import EmptyState from "../components/emptyState";
 import KpiCard from "../components/kpiCard";
+import CardHeader from "../components/cardHeader";
 import ChannelRow from "../components/channelRow";
 import RiskModal from "../components/riskModal";
 import { getChannels, getDashboardKPIs, getVideos, getChannelRisk, getChannelsWithRisk } from "../../api/backend";
@@ -256,26 +257,7 @@ export default function ChannelsPage() {
       setRiskModalOpen(true);
     } catch (err) {
       console.error("Failed to fetch channel risk:", err);
-      // Show modal with mock data if API fails
-      setSelectedChannelRisk({
-        channel_id: channelId,
-        channel_name: rows.find((r) => r.id === channelId)?.name || "Unknown",
-        video_count: rows.find((r) => r.id === channelId)?.videos || 0,
-        videos_with_risk: Math.floor(Math.random() * 20) + 5,
-        avg_risk_score: rows.find((r) => r.id === channelId)?.riskScore || 0,
-        risk_level: rows.find((r) => r.id === channelId)?.riskLevel || "low",
-        risk_breakdown: {
-          self_harm: Math.random() * 0.3,
-          violence: Math.random() * 0.5,
-          illegal_activities: Math.random() * 0.2,
-          misinformation: Math.random() * 0.6,
-          hate_speech: Math.random() * 0.3,
-          harassment: Math.random() * 0.4,
-          toxicity: Math.random() * 0.5,
-        },
-        high_risk_videos: [],
-      });
-      setRiskModalOpen(true);
+      // TODO: optionally show a toast/error message here
     } finally {
       setRiskLoading(false);
     }
@@ -321,19 +303,19 @@ export default function ChannelsPage() {
         <div className="mb-6 h-px w-full bg-linear-to-r from-transparent via-teal-500/30 to-transparent" />
 
         {/* ── KPIs ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <KpiCard
-            icon={<Users className="h-3.5 w-3.5" />}
-            title="Channels Tracked"
-            value={channelsError ? "—" : formatNumber(animatedChannels)}
-            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
-            loading={loading}
-          />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard
             icon={<Video className="h-3.5 w-3.5" />}
             title="Total Videos"
             value={kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
             sub={kpisError ? "Failed to load" : loading ? "Loading…" : "Across all tracked channels"}
+            loading={loading}
+          />
+          <KpiCard
+            icon={<ShieldAlert className="h-3.5 w-3.5" />}
+            title="Avg. Risk Score"
+            value={loading || channelsError ? "—" : `${avgRiskScore}`}
+            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
             loading={loading}
           />
           <KpiCard
@@ -352,17 +334,10 @@ export default function ChannelsPage() {
             loading={loading}
           />
           <KpiCard
-            icon={<Zap className="h-3.5 w-3.5" />}
-            title="API Quota Used"
-            value="N/A"
-            sub="Not available"
-            loading={loading}
-          />
-          <KpiCard
-            icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            title="Avg Risk Score"
-            value={loading || channelsError ? "—" : `${avgRiskScore}`}
-            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
+            icon={<Users className="h-3.5 w-3.5" />}
+            title="Channels Tracked"
+            value={channelsError ? "—" : formatNumber(animatedChannels)}
+            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
             loading={loading}
           />
         </div>
@@ -370,6 +345,10 @@ export default function ChannelsPage() {
         {/* ── Channel table ── */}
         <div className="mt-6">
           <Card>
+            <CardHeader
+              title="Creator Overview"
+              subtitle="Performance and risk calculation across all monitored channels"
+            />
             {/* Table header */}
             <div className="grid grid-cols-12 items-center gap-4 border-b border-white/6 px-6 py-3">
               <div className="col-span-4 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Channel</div>

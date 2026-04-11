@@ -324,19 +324,19 @@ export default function LandingPage() {
                 step: "01",
                 icon: <Radio className="h-5 w-5 text-neutral-400" />,
                 title: "Ingest & Index",
-                desc: "MatchIQ continuously pulls video metadata, transcripts, and engagement signals from tracked YouTube channels across five major leagues.",
+                desc: "MatchIQ continuously pulls video metadata, transcripts, and engagement signals from tracked YouTube channels across five major European leagues, building a structured index of soccer content.",
               },
               {
                 step: "02",
                 icon: <Zap className="h-5 w-5 text-neutral-400" />,
                 title: "Analyze & Score",
-                desc: "Track claims, sentiment, and emerging trends using AI.",
+                desc: "LLM pipelines process every transcript to extract claims, detect emerging narratives, and measure fan sentiment. Then, they score each creator for risk signals like misinformation, toxicity, and harmful content patterns.",
               },
               {
                 step: "03",
                 icon: <BarChart2 className="h-5 w-5 text-neutral-400" />,
                 title: "Surface & Act",
-                desc: "Findings are surfaced in dashboards, trend charts, and channel profiles so users can explore insights and patterns.",
+                desc: "Insights are surfaced across dashboards, trend charts, and channel profiles, presenting a clear view of what's being said, who's saying it, and how narratives are shifting across leagues.",
               },
             ].map((s) => (
               <div key={s.step} className="relative rounded-xl border border-white/7 bg-white/2 p-7">
