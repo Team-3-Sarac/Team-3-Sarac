@@ -236,12 +236,12 @@ async def process_cluster(api_base_url, cluster_id, claims):
     }]
     
     # Send to API Route
-    result = await call_ingest_route(api_base_url, "/narratives", narrative_payload)
+    result = await call_ingest_route(api_base_url, "/ingest/narratives", narrative_payload)
     
     if result:
         await update_progress(intel['narrative_label'])
 
-async def run_pipeline(api_base_url="http://localhost:8000/ingest"):
+async def run_pipeline(api_base_url="http://localhost:8000"):
     global total_narratives
     print(f"\n--- Starting Async Narrative Pipeline ---")
 
