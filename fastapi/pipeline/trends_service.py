@@ -14,26 +14,26 @@ if fastapi_root not in sys.path:
 from routes.database.database import db
 from pipeline.trend_scoring_weighted import run_trend_scoring
 
-async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
+async def calculate_trends(api_base_url="http://localhost:8000"):
     """
     Orchestrator that calculates scores and pushes them to the API.
     """
     now = datetime.now(timezone.utc)
-    
+
     # Trigger calculation engine
     scored_results = run_trend_scoring(upsert_data=False)
-    
+
     if not scored_results:
         print("No scored results returned from algorithm.")
         return {"error": "No results"}
 
     score_lookup = {str(res["mongo_id"]): res["trend_score"] for res in scored_results if "mongo_id" in res}
-    
+
     trends_to_sync = []
     meta_to_sync = []
-    
+
     narratives = await db.narratives.find().to_list(length=None)
-    
+
     for narrative in narratives:
         narr_id = str(narrative["_id"])
         label = narrative.get("narrative_label", "Unknown")
@@ -44,7 +44,27 @@ async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
             continue
 
         claims = await db.claims.find({"_id": {"$in": [ObjectId(cid) for cid in claim_ids]}}).to_list(length=None)
-        video_ids = [str(c.get("video_id")) for c in claims if c.get("video_id")]
+
+        # Safely convert video_id ObjectId to plain hex string to match score_lookup keys
+        video_ids = [
+            str(c["video_id"]) if isinstance(c.get("video_id"), ObjectId) else str(c["video_id"])
+            for c in claims if c.get("video_id")
+        ]
+
+        # Compute category counts from claims narrative_category field
+        category_counts = {"transfers": 0, "injuries": 0, "tactics": 0, "controversy": 0, "other": 0}
+        for claim in claims:
+            cat = (claim.get("narrative_category") or "").lower()
+            if cat == "transfers":
+                category_counts["transfers"] += 1
+            elif cat == "injuries":
+                category_counts["injuries"] += 1
+            elif cat == "tactics":
+                category_counts["tactics"] += 1
+            elif cat == "controversy":
+                category_counts["controversy"] += 1
+            elif cat == "other":
+                category_counts["other"] += 1
 
         relevant_scores = [score_lookup[vid] for vid in video_ids if vid in score_lookup]
 
@@ -61,6 +81,10 @@ async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
         direction = "up" if current_score > prior_score else "down" if current_score < prior_score else "stable"
         change_pct = round(((current_score - prior_score) / prior_score * 100), 2) if prior_score > 0 else 100.0
 
+        # Normalize league to always be a list
+        league_raw = narrative.get("league", [])
+        league = league_raw if isinstance(league_raw, list) else [league_raw] if league_raw else []
+
         meta_to_sync.append({
             "_id": {"slug": slug, "ts": now.isoformat()},
             "value": current_score,
@@ -76,12 +100,13 @@ async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
             "change_pct": change_pct,
             "trending_direction": direction,
             "last_updated": now.isoformat(),
-            "league": narrative.get("league", []),
+            "league": league,
             "mention_count": len(claim_ids),
-            "Transfers": narrative.get("category_counts", {}).get("Transfers", 0),
-            "Injuries": narrative.get("category_counts", {}).get("Injuries", 0),
-            "Tactics": narrative.get("category_counts", {}).get("Tactics", 0),
-            "Controversy": narrative.get("category_counts", {}).get("Controversy", 0),
+            "transfers":   category_counts["transfers"],
+            "injuries":    category_counts["injuries"],
+            "tactics":     category_counts["tactics"],
+            "controversy": category_counts["controversy"],
+            "other":       category_counts["other"],
             "created_at": now.isoformat(),
             "updated_at": now.isoformat()
         })
@@ -90,10 +115,10 @@ async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
     async with httpx.AsyncClient() as client:
         try:
             if meta_to_sync:
-                await client.post(f"{api_base_url}/trends/meta", json=meta_to_sync, timeout=15.0)
-            
+                await client.post(f"{api_base_url}/ingest/trends/meta", json=meta_to_sync, timeout=15.0)
+
             if trends_to_sync:
-                resp = await client.post(f"{api_base_url}/trends", json=trends_to_sync, timeout=15.0)
+                resp = await client.post(f"{api_base_url}/ingest/trends", json=trends_to_sync, timeout=15.0)
                 resp.raise_for_status()
                 sync_summary = resp.json()
         except Exception as e:
@@ -103,6 +128,7 @@ async def calculate_trends(api_base_url="http://localhost:8000/ingest"):
     print("\n--- Final Sync Report ---")
     print(json.dumps(sync_summary, indent=2))
     return sync_summary
+
 
 if __name__ == "__main__":
     asyncio.run(calculate_trends())

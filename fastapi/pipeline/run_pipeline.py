@@ -20,7 +20,7 @@ from pipeline.narrative_pipeline import run_pipeline as run_narrative_building
 from pipeline.trends_service import calculate_trends
 
 # Configuration Defaults
-DEFAULT_API_BASE_URL = "http://localhost:8000/ingest"
+DEFAULT_API_BASE_URL = "http://localhost:8000"
 CHANNEL_IDS = [
     "UCET00YnetHT7tOpu12v8jxg",
     "UCqZQlzSHbVJrwrn5XvzrzcA",
@@ -82,11 +82,11 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
     try:
         channels_metadata = await fetch_channels_data(channel_ids)
         if channels_metadata:
-            c_resp = requests.post(f"{api_base_url}/channels", json=channels_metadata)
+            c_resp = requests.post(f"{api_base_url}/ingest/channels", json=channels_metadata)
             c_resp.raise_for_status()
             c_data = c_resp.json()
             print(f"Successfully updated {len(channels_metadata)} channels.")
-            print(f" - Processed: {c_data.get('inserted', 0) or c_data.get('processed', 0)}")
+            print(f" - Processed: {c_data.get('processed', 0)}")
         else:
             print("No channel metadata found.")
         timer.stop("Phase 1: Channel Metadata")
@@ -103,10 +103,10 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
 
         video_ids = [v['youtube_video_id'] for v in video_metadata]
 
-        v_resp = requests.post(f"{api_base_url}/videos", json=video_metadata)
+        v_resp = requests.post(f"{api_base_url}/ingest/videos", json=video_metadata)
         v_resp.raise_for_status()
         v_data = v_resp.json()
-        print(f"Successfully processed videos. New: {v_data.get('inserted', 0)}, Updated: {v_data.get('updated', 0)}")
+        print(f"New (Upserted): {v_data.get('upserted', 0)}, Modified: {v_data.get('modified', 0)}")
         timer.stop("Phase 2: Video Metadata")
     except Exception as e:
         print(f"FAILED Phase 2: {e}")
@@ -130,8 +130,8 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
     # --- Phase 4: Content Ingestion ---
     timer.start("Phase 4: Content MongoDB Ingestion")
     ingestion_payloads = [
-        (all_comments, f"{api_base_url}/comments", "Comments"),
-        (all_transcripts, f"{api_base_url}/transcripts", "Transcripts")
+        (all_comments, f"{api_base_url}/ingest/comments", "Comments"),
+        (all_transcripts, f"{api_base_url}/ingest/transcripts", "Transcripts")
     ]
 
     for data, endpoint, label in ingestion_payloads:
@@ -141,10 +141,11 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
                 resp.raise_for_status()
                 resp_json = resp.json()
                 print(f"Status code for {label}: {resp.status_code}")
-                print(f" - Processed/Inserted: {resp_json.get('inserted', 0) or resp_json.get('processed', 0)}")
+                print(f" - Processed/Inserted: {resp_json.get('inserted', 0) or (resp_json.get('upserted') + resp_json.get('modified', 0))}")
 
-                if resp_json.get("skipped_count"):
-                    print(f" - WARNING: Skipped {resp_json['skipped_count']} records.")
+                if resp_json.get("skipped_video_ids"):
+                    print(f" - WARNING: Skipped for ingestion for {resp_json['skipped_video_ids']}.")
+
             except Exception as e:
                 print(f"Error uploading {label}: {e}")
         else:
