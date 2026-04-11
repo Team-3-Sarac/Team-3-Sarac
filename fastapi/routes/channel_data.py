@@ -56,6 +56,19 @@ async def fetch_channels_data(channel_ids):
             channel_videos = await cursor.to_list(length=1000)
             latest_video = channel_videos[0] if channel_videos else None
 
+            now = datetime.now(timezone.utc).isoformat()
+            raw_created_at = None
+            if existing_channel:
+                raw_created_at = existing_channel.get("created_at")
+
+            # If it's already a datetime object (from Mongo), convert to string
+            if isinstance(raw_created_at, datetime):
+                created_at_str = raw_created_at.isoformat()
+            elif isinstance(raw_created_at, str):
+                created_at_str = raw_created_at
+            else:
+                created_at_str = now
+
             # 4. Build Object matching Channel schema
             return {
                 "channel_id": channel_id,
@@ -70,8 +83,8 @@ async def fetch_channels_data(channel_ids):
                 "latest_title": latest_video['title'] if latest_video else "N/A",
                 "latest_views": latest_video['view_count'] if latest_video else 0,
                 "active": existing_channel.get("active", True) if existing_channel else True,
-                "created_at": existing_channel.get("created_at") if existing_channel else datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc)
+                "created_at": created_at_str,
+                "updated_at": now
             }
         except Exception as e:
             print(f"Error processing channel {channel_id}: {e}")
