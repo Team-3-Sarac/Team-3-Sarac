@@ -1,5 +1,5 @@
 "use client";
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Legend } from "recharts";
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { getTrendsHistory } from "../../api/backend";
 import { useEffect, useState } from "react";
 
@@ -14,6 +14,7 @@ type TrendHistory = {
 export default function LineChartComponent() {
   const [data, setData] = useState<TrendHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -21,10 +22,19 @@ export default function LineChartComponent() {
         const res = await getTrendsHistory();
         setData(res.history || []);
       } catch (err) {
-        console.error("Failed to fetch trends history:", err);
+        console.error("[LineChart] Failed to fetch trends history:", err);
+        setError(true);
       } finally {
         setLoading(false);
       }
+      if (error) {
+        return (
+          <div className="flex h-64 items-center justify-center text-sm text-neutral-500">
+            Failed to load trend history
+          </div>
+        );
+      }
+
     }
     fetchData();
   }, []);

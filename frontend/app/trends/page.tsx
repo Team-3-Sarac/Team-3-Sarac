@@ -341,7 +341,7 @@ export default function TrendsPage() {
         />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-12">
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-12">
 
         {/* ── Page header ── */}
         <div className="mb-10">
@@ -353,7 +353,7 @@ export default function TrendsPage() {
             Trends
           </h1>
           <p className="mt-2 text-sm text-neutral-500">
-            Discover trending topics and narratives across European soccer leagues
+            Discover trending topics narratives, and claims across European soccer leagues
           </p>
         </div>
 
@@ -374,8 +374,8 @@ export default function TrendsPage() {
 
           <Card>
             <CardHeader
-              title="Narrative Trends"
-              subtitle="Topic frequency over the past 6 weeks"
+              title="Topic Frequency"
+              subtitle="Most discussed topics over the last 6 weeks"
               legendItems={[
                 { color: "bg-emerald-400", label: "Transfers" },
                 { color: "bg-red-400",     label: "Injuries" },
@@ -416,12 +416,12 @@ export default function TrendsPage() {
           </Card>
         </div>
 
-        {/* ── Trending Topics table ── */}
+        {/* ── Narrative Trends table ── */}
         <div className="mt-6">
           <Card>
             <CardHeader
-              title="Trending Topics"
-              subtitle="Most discussed narratives across YouTube soccer channels"
+              title="Headline Narratives"
+              subtitle="Leading stories across YouTube soccer channels, organized by topic"
             />
 
             {/* Category tabs + sort toggle */}
