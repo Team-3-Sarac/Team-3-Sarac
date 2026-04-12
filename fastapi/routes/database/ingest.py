@@ -791,7 +791,7 @@ async def get_sentiment_history():
                 }
             }
         ]
-        video_result = list(db.videos.aggregate(video_pipeline))
+        video_result = await db.videos.aggregate(video_pipeline).to_list(length=1)
         
         # Generate mock weekly data based on video engagement
         now = datetime.now()

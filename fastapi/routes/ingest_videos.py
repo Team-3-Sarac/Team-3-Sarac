@@ -16,10 +16,11 @@ from pathlib import Path
 load_dotenv()
 
 API_KEY = os.getenv("YOUTUBE_API_KEY")
-if not API_KEY:
-    raise ValueError("API key not found. Check your .env file.")
 
-youtube = build("youtube", "v3", developerKey=API_KEY)
+def _require_api_key():
+    if not API_KEY:
+        raise ValueError("YOUTUBE_API_KEY not found. Check your .env file.")
+    return API_KEY
 
 #dataset and quality control 
 VIEW_THRESHOLD = 5000
@@ -39,7 +40,7 @@ EXCLUDE_KEYWORDS = [
 
 def get_youtube_client():
     """Creates a new client instance for thread safety."""
-    return build("youtube", "v3", developerKey=API_KEY, static_discovery=False)
+    return build("youtube", "v3", developerKey=_require_api_key(), static_discovery=False)
 
 def get_uploads_playlist(client, channel_id):
     response = client.channels().list( part="contentDetails", id=channel_id).execute() 
