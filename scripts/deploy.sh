@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_DIR="/Team-3-Sarac"
 COMPOSE_FILE="$REPO_DIR/docker-compose.yml"
+ENV_FILE="$REPO_DIR/fastapi/.env"
 HEALTH_TIMEOUT=90
 HEALTH_INTERVAL=5
 
@@ -10,17 +11,28 @@ log() { echo "[deploy] $(date '+%H:%M:%S') $*"; }
 
 cd "$REPO_DIR"
 
+if [ ! -f "$ENV_FILE" ]; then
+    log "ERROR: $ENV_FILE missing. Upload it from CI before deploy."
+    exit 1
+fi
+
+cp -f "$ENV_FILE" "$REPO_DIR/.env"
+
+compose() {
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
 log "Stopping existing containers..."
-docker compose -f "$COMPOSE_FILE" down --timeout 30 || true
+compose down --timeout 30 || true
 
 log "Rebuilding containers..."
-docker compose -f "$COMPOSE_FILE" build --pull
+compose build --pull
 
 log "Starting containers..."
-docker compose -f "$COMPOSE_FILE" up -d
+compose up -d
 
 log "Waiting for all containers to become healthy..."
-SERVICES=$(docker compose -f "$COMPOSE_FILE" ps --format '{{.Name}}')
+SERVICES=$(compose ps --format '{{.Name}}')
 elapsed=0
 
 while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
@@ -44,8 +56,8 @@ done
 
 if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
     log "ERROR: Not all containers became healthy within ${HEALTH_TIMEOUT}s"
-    docker compose -f "$COMPOSE_FILE" ps
-    docker compose -f "$COMPOSE_FILE" logs --tail=30
+    compose ps
+    compose logs --tail=30
     exit 1
 fi
 
@@ -53,4 +65,4 @@ log "Pruning old Docker images..."
 docker image prune -af --filter "until=168h" || true
 
 log "Deploy complete."
-docker compose -f "$COMPOSE_FILE" ps
+compose ps

@@ -11,7 +11,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy via SSH
+      - name: Sync repo on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_IP }}
@@ -32,4 +32,35 @@ jobs:
               git reset --hard origin/main
             fi
 
-            bash scripts/deploy.sh
+      - name: Write env file for upload
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.env }}
+        run: |
+          mkdir -p fastapi
+          if [ -z "${ENV_FILE_CONTENT:-}" ]; then
+            echo "::error::Repository secret 'env' is empty or not set. Add a multiline secret named env with your .env contents."
+            exit 1
+          fi
+          printf '%s\n' "$ENV_FILE_CONTENT" > fastapi/.env
+
+      - name: Copy .env to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USERNAME }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "fastapi/.env"
+          target: "/Team-3-Sarac/fastapi/"
+          strip_components: 0
+          overwrite: true
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USERNAME }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            bash /Team-3-Sarac/scripts/deploy.sh
