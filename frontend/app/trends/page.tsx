@@ -9,7 +9,7 @@ import Badge from "../components/badge";
 import TopicRow from "../components/topicRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
-import { getTrends, getLeagueStats, getNarratives, getDashboardClaims } from "../../api/backend";
+import { getTrends, getNarratives, getDashboardClaims } from "../../api/backend";
 import { ArrowUpDown } from "lucide-react";
 
 /* ---------------- Types ---------------- */
