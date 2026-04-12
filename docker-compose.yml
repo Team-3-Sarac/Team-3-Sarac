@@ -90,3 +90,7 @@ volumes:
     name: mongo_data
   qdrant_data:
     name: qdrant_data
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
