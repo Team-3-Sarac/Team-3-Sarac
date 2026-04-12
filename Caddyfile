@@ -1,0 +1,3 @@
+api.utdshpe.org {
+    reverse_proxy fastapi:8000
+}

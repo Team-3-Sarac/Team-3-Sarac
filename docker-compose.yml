@@ -1,4 +1,17 @@
 services:
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/caddy_config
+    depends_on:
+      - fastapi
+      
   fastapi:
     build: ./fastapi
     container_name: fastapi
