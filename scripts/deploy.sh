@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# If you change MONGO_ROOT_USERNAME / MONGO_ROOT_PASSWORD / MONGO_DATABASE after
+# Mongo was already initialized, auth will fail until you reset the volume:
+#   docker compose --env-file ./fastapi/.env -f ./docker-compose.yml down
+#   docker volume rm mongo_data
+
 REPO_DIR="/Team-3-Sarac"
 COMPOSE_FILE="$REPO_DIR/docker-compose.yml"
 ENV_FILE="$REPO_DIR/fastapi/.env"
@@ -8,6 +13,21 @@ HEALTH_TIMEOUT=90
 HEALTH_INTERVAL=5
 
 log() { echo "[deploy] $(date '+%H:%M:%S') $*"; }
+
+container_ready() {
+    local name="$1"
+    local has_health
+    has_health=$(docker inspect --format='{{if .State.Health}}yes{{else}}no{{end}}' "$name" 2>/dev/null || echo "no")
+    if [ "$has_health" = "yes" ]; then
+        local status
+        status=$(docker inspect --format='{{.State.Health.Status}}' "$name" 2>/dev/null || echo "")
+        [ "$status" = "healthy" ]
+    else
+        local running
+        running=$(docker inspect --format='{{.State.Running}}' "$name" 2>/dev/null || echo "false")
+        [ "$running" = "true" ]
+    fi
+}
 
 cd "$REPO_DIR"
 
@@ -31,22 +51,21 @@ compose build --pull
 log "Starting containers..."
 compose up -d
 
-log "Waiting for all containers to become healthy..."
+log "Waiting for all containers to become ready..."
 SERVICES=$(compose ps --format '{{.Name}}')
 elapsed=0
 
 while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
-    all_healthy=true
+    all_ready=true
     for svc in $SERVICES; do
-        status=$(docker inspect --format='{{.State.Health.Status}}' "$svc" 2>/dev/null || echo "none")
-        if [ "$status" != "healthy" ]; then
-            all_healthy=false
+        if ! container_ready "$svc"; then
+            all_ready=false
             break
         fi
     done
 
-    if $all_healthy; then
-        log "All containers are healthy."
+    if $all_ready; then
+        log "All containers are ready."
         break
     fi
 
@@ -55,7 +74,7 @@ while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
 done
 
 if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
-    log "ERROR: Not all containers became healthy within ${HEALTH_TIMEOUT}s"
+    log "ERROR: Not all containers became ready within ${HEALTH_TIMEOUT}s"
     compose ps
     compose logs --tail=30
     exit 1
