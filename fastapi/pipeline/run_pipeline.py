@@ -173,7 +173,7 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
                 print("No Comments data collected.")
 
             if all_transcripts:
-                await post_json(http_client, f"{api_base_url}/ingest/transcripts", all_transcripts)
+                await post_json(http_client, f"{api_base_url}/ingest/transcripts", all_transcripts, "Transcripts")
             else:
                 print("No Transcripts data collected.")
 
