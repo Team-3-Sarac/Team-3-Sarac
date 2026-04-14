@@ -26,8 +26,8 @@ def _create_session():
 
 
 MAX_RETRIES = 3
-RETRY_BASE_DELAY = 5
-PER_VIDEO_DELAY = 2
+RETRY_BASE_DELAY = 10
+PER_VIDEO_DELAY = 5
 
 
 def fetch_single_transcript(video_id):
