@@ -83,14 +83,14 @@ async def post_json(client: httpx.AsyncClient, url: str, data: list, label: str)
     return resp_json
 
 
-async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
+async def run_ingest_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
+    """Phases 1-4: Fetch data from YouTube and ingest into the database.
+    Designed to run locally so transcript scraping uses a non-datacenter IP."""
     timer = StageTimer()
     overall_start = datetime.now()
-    print(f"[{overall_start}] Starting Ingestion Pipeline...")
+    print(f"[{overall_start}] Starting Data Ingestion (Phases 1-4)...")
     print(f"Target API: {api_base_url}")
 
-    # Single shared async client for all HTTP calls — avoids re-establishing
-    # connections and eliminates the event loop blocking caused by requests.post
     async with httpx.AsyncClient(timeout=120.0) as http_client:
 
         # --- Phase 1: Channel Metadata Fetch & Ingest ---
@@ -114,7 +114,6 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
         try:
             video_metadata = await ingest_from_channels(channel_ids, days_back, KEYWORDS, EXCLUDE_KEYWORDS)
 
-            # filter out previously identified irrelevant videos
             blacklisted_docs = await db.blacklisted_videos.find({}, {"youtube_video_id": 1}).to_list(length=None)
             blacklisted = {doc["youtube_video_id"] for doc in blacklisted_docs}
             video_metadata = [v for v in video_metadata if v['youtube_video_id'] not in blacklisted]
@@ -163,7 +162,6 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
         if vids_missing_transcripts:
             await db.videos.delete_many({"youtube_video_id": {"$in": list(vids_missing_transcripts)}})
             print(f"Removed {len(vids_missing_transcripts)} videos missing transcripts.")
-            # add comments only for videos with transcripts
             filtered_comments = [c for c in all_comments if c["video_id"] in vids_with_transcripts]
 
         try:
@@ -182,40 +180,58 @@ async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
 
         timer.stop("Phase 4: Content MongoDB Ingestion")
 
-        # --- Intelligence Phases (Passing API URL to extractors) ---
-        timer.start("Phase 5: LLM Claim, Risk, Sentiment Extraction")
-        try:
-            await run_llm_extraction(api_base_url=api_base_url)
-        except Exception as e:
-            print(f"FAILED Phase 5: {e}")
-        finally:
-            timer.stop("Phase 5: LLM Claim, Risk, Sentiment Extraction")
+    timer.get_summary()
+    print(f"\n[{datetime.now()}] Data Ingestion Complete.")
 
-        timer.start("Phase 6: LLM Narrative Building")
-        try:
-            await run_narrative_building(api_base_url=api_base_url)
-        except Exception as e:
-            print(f"FAILED Phase 6: {e}")
-        finally:
-            timer.stop("Phase 6: LLM Narrative Building")
 
-        timer.start("Phase 7: Trend Calculation")
-        try:
-            await calculate_trends(api_base_url=api_base_url)
-        except Exception as e:
-            print(f"FAILED Phase 7: {e}")
-        finally:
-            timer.stop("Phase 7: Trend Calculation")
+async def run_analysis_pipeline(api_base_url):
+    """Phases 5-7: LLM extraction, narrative building, trend calculation.
+    Designed to run on the server where Qdrant and OpenAI are accessible."""
+    timer = StageTimer()
+    overall_start = datetime.now()
+    print(f"[{overall_start}] Starting Analysis Pipeline (Phases 5-7)...")
+    print(f"Target API: {api_base_url}")
+
+    timer.start("Phase 5: LLM Claim, Risk, Sentiment Extraction")
+    try:
+        await run_llm_extraction(api_base_url=api_base_url)
+    except Exception as e:
+        print(f"FAILED Phase 5: {e}")
+    finally:
+        timer.stop("Phase 5: LLM Claim, Risk, Sentiment Extraction")
+
+    timer.start("Phase 6: LLM Narrative Building")
+    try:
+        await run_narrative_building(api_base_url=api_base_url)
+    except Exception as e:
+        print(f"FAILED Phase 6: {e}")
+    finally:
+        timer.stop("Phase 6: LLM Narrative Building")
+
+    timer.start("Phase 7: Trend Calculation")
+    try:
+        await calculate_trends(api_base_url=api_base_url)
+    except Exception as e:
+        print(f"FAILED Phase 7: {e}")
+    finally:
+        timer.stop("Phase 7: Trend Calculation")
 
     timer.get_summary()
-    print(f"\n[{datetime.now()}] Pipeline Task Completed.")
+    print(f"\n[{datetime.now()}] Analysis Pipeline Complete.")
+
+
+async def run_main_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1):
+    """Full pipeline: ingest + analysis. Used when running everything in one place."""
+    await run_ingest_pipeline(api_base_url, channel_ids, days_back)
+    await run_analysis_pipeline(api_base_url)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the Sports Intelligence Ingestion Pipeline.")
     parser.add_argument("--api-url", type=str, default=DEFAULT_API_BASE_URL, help="Base URL for the ingestion API")
+    parser.add_argument("--days-back", type=int, default=1, help="Number of days to look back for new videos")
     args = parser.parse_args()
 
     try:
-        asyncio.run(run_main_pipeline(api_base_url=args.api_url))
+        asyncio.run(run_main_pipeline(api_base_url=args.api_url, days_back=args.days_back))
     except KeyboardInterrupt:
         print("\nPipeline stopped by user.")

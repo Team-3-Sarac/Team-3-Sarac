@@ -6,7 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, HTTPException, Query
 
-from pipeline.run_pipeline import run_main_pipeline, CHANNEL_IDS, DEFAULT_API_BASE_URL
+from pipeline.run_pipeline import run_main_pipeline, run_analysis_pipeline, CHANNEL_IDS, DEFAULT_API_BASE_URL
 
 router = APIRouter()
 logger = logging.getLogger("pipeline")
@@ -76,6 +76,34 @@ async def trigger_pipeline(
 
     asyncio.create_task(_run_pipeline(days_back=days_back, api_url=api_url))
     return {"message": "Pipeline started.", "days_back": days_back}
+
+
+@router.post("/run-analysis")
+async def trigger_analysis(
+    api_url: str = Query(default=PIPELINE_API_URL),
+):
+    """Trigger only the analysis phases (5-7) on the server.
+    Called after local data ingestion completes."""
+    if _pipeline_lock.locked():
+        raise HTTPException(status_code=409, detail="Pipeline is already running.")
+
+    async def _run_analysis():
+        global _last_run
+        started = datetime.now(timezone.utc)
+        _last_run = {"status": "running", "started_at": started.isoformat(), "finished_at": None, "error": None}
+        try:
+            async with _pipeline_lock:
+                await run_analysis_pipeline(api_base_url=api_url)
+            _last_run["status"] = "completed"
+        except Exception as exc:
+            logger.exception("Analysis pipeline failed")
+            _last_run["status"] = "failed"
+            _last_run["error"] = str(exc)
+        finally:
+            _last_run["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    asyncio.create_task(_run_analysis())
+    return {"message": "Analysis pipeline started (Phases 5-7)."}
 
 
 @router.get("/status")
