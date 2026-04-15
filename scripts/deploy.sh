@@ -46,7 +46,7 @@ log "Stopping existing containers..."
 compose down --timeout 30 || true
 
 log "Rebuilding containers..."
-compose build --pull
+compose build --no-cache --pull
 
 log "Starting containers..."
 compose up -d

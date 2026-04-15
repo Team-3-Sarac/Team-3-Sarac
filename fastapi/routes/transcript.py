@@ -1,5 +1,6 @@
 from youtube_transcript_api import YouTubeTranscriptApi
 import json
+import os
 from fastapi import APIRouter
 import random
 import time
@@ -15,48 +16,60 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
-def create_session():
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 10
+PER_VIDEO_DELAY = 5
+
+
+def _new_api():
     session = Session()
-    session.headers.update({
-        "User-Agent": random.choice(USER_AGENTS)
-    })
-    return session
+    session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+    return YouTubeTranscriptApi(http_client=session)
+
 
 def fetch_single_transcript(video_id):
-    ytt_api = YouTubeTranscriptApi(http_client=create_session())
-    try:
-        print(f"Fetching transcript for: {video_id}")
-        transcript = ytt_api.fetch(video_id)
-        return {
-            "video_id": video_id,
-            "transcript": transcript.to_raw_data()
-        }
-    except Exception as e:
-        error_str = str(e)
-        match = re.search(r"most likely caused by:\s*(.*?)(?=!|If you are sure|$)", error_str, re.DOTALL)
-        
-        if match:
-            reason = match.group(1).strip().replace('\n', ' ')
-        else:
-            reason = error_str.split('\n')[0]
+    for attempt in range(1, MAX_RETRIES + 1):
+        ytt_api = _new_api()
+        try:
+            print(f"Fetching transcript for: {video_id}" + (f" (attempt {attempt})" if attempt > 1 else ""))
+            transcript = ytt_api.fetch(video_id)
+            return {
+                "video_id": video_id,
+                "transcript": transcript.to_raw_data()
+            }
+        except Exception as e:
+            error_str = str(e)
+            is_rate_limit = "429" in error_str or "too many" in error_str.lower()
 
-        print(f"FAILED: {video_id} | Reason: {reason}")
+            match = re.search(r"most likely caused by:\s*(.*?)(?=!|If you are sure|$)", error_str, re.DOTALL)
+            if match:
+                reason = match.group(1).strip().replace('\n', ' ')
+            else:
+                reason = error_str.split('\n')[0]
 
-# Rotates user agent every 15 videos, current implementation avoids ip ban
-async def get_multi_transcripts(video_ids, delay = 0):
+            if is_rate_limit and attempt < MAX_RETRIES:
+                wait = RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 2)
+                print(f"RATE LIMITED: {video_id} | Retrying in {wait:.1f}s (attempt {attempt}/{MAX_RETRIES})")
+                time.sleep(wait)
+                continue
 
+            print(f"FAILED: {video_id} | Reason: {reason}")
+            return None
+
+
+async def get_multi_transcripts(video_ids, delay=0):
     processed_data = []
     batch_size = 15
 
     for i in range(0, len(video_ids), batch_size):
         batch = video_ids[i:i+batch_size]
-        print(f"\n--- Processing batch {i//batch_size + 1} {len(batch)} videos) ---")
+        print(f"\n--- Processing batch {i//batch_size + 1} ({len(batch)} videos) ---")
 
-        tasks = [asyncio.to_thread(fetch_single_transcript, vid) for vid in batch]
-
-        results = await asyncio.gather(*tasks)
-
-        processed_data.extend([r for r in results if r is not None])
+        for vid in batch:
+            result = await asyncio.to_thread(fetch_single_transcript, vid)
+            if result is not None:
+                processed_data.append(result)
+            await asyncio.sleep(PER_VIDEO_DELAY + random.uniform(0, 1))
 
         if delay > 0 and i + batch_size < len(video_ids):
             wait_time = random.uniform(delay * 0.5, delay)
