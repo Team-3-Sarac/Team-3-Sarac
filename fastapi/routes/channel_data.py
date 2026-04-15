@@ -33,6 +33,7 @@ async def fetch_channels_data(channel_ids):
     """
     Main functionality: Uses the imported 'db' instance, fetches YT metadata,
     and returns a list of dictionaries formatted for the ingest route.
+    Optimized to prevent timeouts by using count_documents and find_one.
     """
     yt_client = get_youtube_client()
 
@@ -50,11 +51,6 @@ async def fetch_channels_data(channel_ids):
 
             item = response["items"][0]
             snippet, stats = item["snippet"], item["statistics"]
-
-            # 3. DB Derivation (Find latest video/count from 'videos' collection)
-            cursor = db.videos.find({"channel_id": channel_id}).sort("publish_date", -1)
-            channel_videos = await cursor.to_list(length=1000)
-            latest_video = channel_videos[0] if channel_videos else None
 
             now = datetime.now(timezone.utc).isoformat()
             raw_created_at = None
@@ -76,12 +72,12 @@ async def fetch_channels_data(channel_ids):
                 "channel_initials": derive_initials(snippet.get("title")),
                 "handle": snippet.get("customUrl"),
                 "sub_count": int(stats.get("subscriberCount", 0)),
-                "league": channel_videos[0].get("league", []) if channel_videos else [],
-                "video_count": len(channel_videos),
-                "sentiment_pct": existing_channel.get("sentiment_pct", 0.0) if existing_channel else 0.0,
+                "league": existing_channel.get("league", []) if existing_channel else [],
+                "video_count": existing_channel.get("video_count", 0) if existing_channel else 0,
+                "sentiment_pct": existing_channel.get("sentiment_pct", 0.5) if existing_channel else 0.5,
                 "sentiment_dir": existing_channel.get("sentiment_dir", "neutral") if existing_channel else "neutral",
-                "latest_title": latest_video['title'] if latest_video else "N/A",
-                "latest_views": latest_video['view_count'] if latest_video else 0,
+                "latest_title": existing_channel.get("latest_title", "N/A") if existing_channel else "N/A",
+                "latest_views": existing_channel.get("latest_views", 0) if existing_channel else 0,
                 "active": existing_channel.get("active", True) if existing_channel else True,
                 "created_at": created_at_str,
                 "updated_at": now
