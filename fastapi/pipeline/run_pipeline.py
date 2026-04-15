@@ -136,17 +136,57 @@ async def run_ingest_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1
         # --- Phase 3: Content Collection ---
         timer.start("Phase 3: Transcripts & Comments Fetching")
         try:
-            print(f"Processing {len(video_ids)} videos concurrently...")
-            all_comments, all_transcripts = await asyncio.gather(
-                get_comments(video_ids),
-                get_multi_transcripts(video_ids, delay=0)
-            )
-            vids_with_transcripts = {t['video_id'] for t in all_transcripts if t.get('transcript')}
-            vids_missing_transcripts = set(video_ids) - vids_with_transcripts
+            # Find which videos already have transcripts in the database
+            # Look up the ObjectIds in transcript_chunks and map them back to YouTube IDs
+            existing_transcripts_docs = await db.transcript_chunks.aggregate([
+                {
+                    "$lookup": {
+                        "from": "videos",
+                        "localField": "video_id",
+                        "foreignField": "_id",
+                        "as": "video_info"
+                    }
+                },
+                {"$unwind": "$video_info"},
+                {
+                    "$match": {
+                        "video_info.youtube_video_id": {"$in": video_ids}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$video_info.youtube_video_id"
+                    }
+                }
+            ]).to_list(length=None)
 
-            print(f"Collected {len(all_comments)} comments and {len(all_transcripts)} transcripts.")
+            existing_yt_ids = {doc["_id"] for doc in existing_transcripts_docs}
+
+            # Filter the list to only fetch what we don't have
+            vids_to_fetch_transcripts = [vid for vid in video_ids if vid not in existing_yt_ids]
+
+            print(f"Total videos: {len(video_ids)}. Already have transcripts for: {len(existing_yt_ids)}.")
+            print(f"Fetching transcripts for {len(vids_to_fetch_transcripts)} new videos...")
+
+            # Execute concurrent fetching
+            # Comments are still fetched for all
+            all_comments, new_transcripts = await asyncio.gather(
+                get_comments(video_ids),
+                get_multi_transcripts(vids_to_fetch_transcripts, delay=0)
+            )
+
+            # For Phase 4 logic consistency, all_transcripts should represent what needs to be saved
+            all_transcripts = new_transcripts
+
+            vids_with_transcripts = {t['video_id'] for t in all_transcripts if t.get('transcript')}
+            # Videos that we didn't fetch because they exist + videos we just successfully fetched
+            total_successful_vids = existing_yt_ids.union(vids_with_transcripts)
+
+            vids_missing_transcripts = set(video_ids) - total_successful_vids
+
+            print(f"Collected {len(all_comments)} comments and {len(new_transcripts)} new transcripts.")
             if vids_missing_transcripts:
-                print(f"Missing transcripts for {len(vids_missing_transcripts)} videos.")
+                print(f"Missing transcripts for {len(vids_missing_transcripts)} videos (failed to fetch).")
 
         except Exception as e:
             print(f"FAILED Phase 3: {e}")
@@ -174,6 +214,12 @@ async def run_ingest_pipeline(api_base_url, channel_ids=CHANNEL_IDS, days_back=1
                 await post_json(http_client, f"{api_base_url}/ingest/transcripts", all_transcripts, "Transcripts")
             else:
                 print("No Transcripts data collected.")
+
+            # Trigger channel refresh for latest videos
+            print(">>> Triggering final channel metadata refresh...")
+            refresh_resp = await http_client.post(f"{api_base_url}/ingest/channels/refresh")
+            refresh_resp.raise_for_status()
+            print(f"Refresh complete: {refresh_resp.json().get('updated_channels')} channels synced.")
 
         except Exception as e:
             print(f"Error during Phase 4 ingestion: {e}")
