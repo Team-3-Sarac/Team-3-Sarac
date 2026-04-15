@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Manually trigger the ingestion pipeline and poll until it finishes.
+# Two-stage pipeline:
+#   1. Phases 1-4 run LOCALLY (YouTube scraping uses your home IP)
+#   2. Phases 5-7 run on the SERVER (LLM + Qdrant analysis)
 #
-# Usage and arguments for the bash :
-#   ./scripts/run-pipeline.sh                       # default: 1 day back, production API
-#   ./scripts/run-pipeline.sh --days 7              # look back 7 days
-#   ./scripts/run-pipeline.sh --url http://localhost:8000   # target local dev server
-#
-# Alternative (SSH into Hetzner and run it in the container):
-#   docker exec fastapi python -m pipeline.run_pipeline
-#   docker exec fastapi python -m pipeline.run_pipeline --api-url http://localhost:8000
+# Usage:
+#   ./scripts/run-pipeline.sh                                # default: 1 day back
+#   ./scripts/run-pipeline.sh --days 7                       # look back 7 days
+#   ./scripts/run-pipeline.sh --url http://localhost:8000    # target local dev server
 
 API_URL="https://api.utdshpe.org"
 DAYS_BACK=1
@@ -30,20 +28,57 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "Triggering pipeline (days_back=${DAYS_BACK}) at ${API_URL}..."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FASTAPI_DIR="$(cd "$SCRIPT_DIR/../fastapi" && pwd)"
+
+if [[ ! -f "$FASTAPI_DIR/pipeline/run_pipeline.py" ]]; then
+    echo "ERROR: Could not find pipeline at $FASTAPI_DIR/pipeline/run_pipeline.py"
+    exit 1
+fi
+
+# ── Stage 1: Local data ingestion (Phases 1-4) ──────────────────────
+echo "================================================"
+echo "  Stage 1: Local Data Ingestion (Phases 1-4)"
+echo "  API target: ${API_URL}"
+echo "  Days back:  ${DAYS_BACK}"
+echo "================================================"
+echo ""
+
+cd "$FASTAPI_DIR"
+
+python -c "
+import asyncio, sys
+sys.path.insert(0, '.')
+from pipeline.run_pipeline import run_ingest_pipeline
+asyncio.run(run_ingest_pipeline(api_base_url='${API_URL}', days_back=${DAYS_BACK}))
+"
+
+INGEST_EXIT=$?
+if [[ "$INGEST_EXIT" -ne 0 ]]; then
+    echo "ERROR: Local ingestion failed (exit code ${INGEST_EXIT})"
+    exit 1
+fi
+
+# ── Stage 2: Trigger server-side analysis (Phases 5-7) ──────────────
+echo ""
+echo "================================================"
+echo "  Stage 2: Server Analysis (Phases 5-7)"
+echo "  Triggering ${API_URL}/pipeline/run-analysis"
+echo "================================================"
+echo ""
 
 HTTP_CODE=$(curl -s -o /tmp/pipeline_response.json -w "%{http_code}" \
-    -X POST "${API_URL}/pipeline/run?days_back=${DAYS_BACK}")
+    -X POST "${API_URL}/pipeline/run-analysis")
 
 cat /tmp/pipeline_response.json
 echo ""
 
 if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
-    echo "ERROR: Pipeline trigger failed with HTTP ${HTTP_CODE}"
+    echo "ERROR: Analysis trigger failed with HTTP ${HTTP_CODE}"
     exit 1
 fi
 
-echo "Pipeline started. Polling status every ${POLL_INTERVAL}s..."
+echo "Analysis started on server. Polling status every ${POLL_INTERVAL}s..."
 echo ""
 
 while true; do
@@ -54,12 +89,12 @@ while true; do
 
     case "$STATUS" in
         completed)
-            echo "[$(date '+%H:%M:%S')] Pipeline completed successfully."
+            echo "[$(date '+%H:%M:%S')] Analysis completed successfully."
             echo "$STATUS_JSON" | python3 -m json.tool 2>/dev/null || echo "$STATUS_JSON"
             exit 0
             ;;
         failed)
-            echo "[$(date '+%H:%M:%S')] Pipeline FAILED."
+            echo "[$(date '+%H:%M:%S')] Analysis FAILED."
             echo "$STATUS_JSON" | python3 -m json.tool 2>/dev/null || echo "$STATUS_JSON"
             exit 1
             ;;
