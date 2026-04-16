@@ -69,22 +69,34 @@ def _build_mongo_uri() -> str:
 # Makes a cache key via hashing the count and timestamp, if the key matches the cached key then we can reuse the data safely
 # Helps avoid expensive joins when the source data actually hasn't changed
 def _compute_mention_cache_key(db) -> str:
-    
-    # Get count of narratives with claims and their last timestamp
-    narratives = list(db["narratives"].find(
-        {"claim_ids": {"$exists": True, "$not": {"$size": 0}}},
-        {"_id": 1, "updated_at": 1}
-    ).sort("updated_at", -1).limit(1))
-    
-    if not narratives:
+
+    pipeline = [
+        {"$match": {"mentions": {"$gt": 0}}},
+        {
+            "$group": {
+                "_id": None,
+                "claim_count": {"$sum": 1},
+                "mention_total": {"$sum": "$mentions"},
+                "latest_created_at": {"$max": "$created_at"},
+            }
+        },
+    ]
+
+    stats = list(db["claims"].aggregate(pipeline))
+    if not stats:
         return "empty"
-    
-    # Hash based on narrative count and most recent update timestamp
-    narrative_count = db["narratives"].count_documents({"claim_ids": {"$exists": True, "$not": {"$size": 0}}})
-    latest_update = narratives[0].get("updated_at", datetime.min).isoformat() if narratives else ""
-    
-    cache_string = f"narratives:{narrative_count}:latest:{latest_update}"
-    return hashlib.md5(cache_string.encode()).hexdigest()                   # 128 bit hash (32 char hex string)
+
+    s = stats[0]
+    latest = s.get("latest_created_at", "")
+    if hasattr(latest, "isoformat"):
+        latest = latest.isoformat()
+
+    cache_string = (
+        f"claims:{s.get('claim_count', 0)}:"
+        f"mentions:{s.get('mention_total', 0)}:"
+        f"latest:{latest}"
+    )
+    return hashlib.md5(cache_string.encode()).hexdigest()
 
 
 # Loads cached data if it exists and returns (cache_key, mention_by_video) tuple where cache_key is empty if it doesnt exist
@@ -178,64 +190,62 @@ def _resolve_join_maps(db) -> tuple[dict[str, list], dict[str, str]]:
 # Bella additions: Added caching optimization to avoid rebuilding the lookup every time
 def _build_mention_by_video(db, use_cache: bool = True) -> dict[str, int]:
     """
-    Builds a {str(video._id): total_mention_count} lookup by joining:
-        Narrative.mention_count + Narrative.claim_ids -> Claim.video_id
+    Builds {video_id: total_mentions} directly from claims collection.
 
-    Queries narratives directly so it works before any trend documents exist
-    (fixes cold-start bug where querying trends first always returned 0).
+    Source of truth:
+        claims.mentions
+        claims.video_id
 
-    A video accumulates mention_count from multiple narratives, so counts are summed.
+    This avoids narratives/trends mismatches and cold-start issues.
     """
 
-    # Check cache first to avoid the expensive join operations
+    # Cache check
     if use_cache:
         cache_key = _compute_mention_cache_key(db)
         cached_key, cached_mentions = _load_mention_cache()
-        
+
         if cache_key and cache_key == cached_key:
             print(f"  [cache hit] Loaded mention data for {len(cached_mentions)} videos from cache")
             return cached_mentions
         else:
-            print(f"  [cache miss] Rebuilding mention_by_video from database")
-    
-    # Pull mention_count from narratives, not from trends, to avoid cold-start failure
-    # Projects only required fields
-    narratives_with_mentions = list(db["narratives"].find(
-        {"claim_ids": {"$exists": True, "$not": {"$size": 0}}},
-        {"_id": 1, "claim_ids": 1, "mention_count": 1}
-    ))
+            print("  [cache miss] Rebuilding mention_by_video from database")
 
-    if not narratives_with_mentions:
-        print("  [note] No narratives with claim_ids found — mention_score will be 0.0 for all videos")
-        return {}
+    # Load claims with mention signal
+    claims_with_mentions = list(
+        db["claims"].find(
+            {"mentions": {"$gt": 0}},
+            {"_id": 1, "video_id": 1, "mentions": 1},
+        )
+    )
 
-    narrative_claims, claim_to_video = _resolve_join_maps(db)
-
-    if not claim_to_video:
-        print("  [note] No claims resolved from narratives — mention_score will be 0.0 for all videos")
+    if not claims_with_mentions:
+        print("  [note] No claims with mentions found — mention_score will be 0.0")
         return {}
 
     mention_by_video: dict[str, int] = defaultdict(int)
 
-    # Builds the mention count lookup by iterating through narratives
-    for narrative in narratives_with_mentions:
-        narrative_id   = str(narrative["_id"])
-        mention_count  = narrative.get("mention_count", 0)
-        claim_ids      = narrative_claims.get(narrative_id, [])
+    for claim in claims_with_mentions:
+        video_id = claim.get("video_id")
+        mentions = claim.get("mentions", 0)
 
-        for cid in claim_ids:
-            video_id = claim_to_video.get(str(cid))
-            if video_id:
-                mention_by_video[video_id] += mention_count
+        if not video_id:
+            continue
+
+        # Key must match videos._id string used later in scoring
+        mention_by_video[str(video_id)] += mentions
 
     result = dict(mention_by_video)
-    print(f"  mention_by_video built: {len(result)} videos with narrative mention data")
-    
-    # Save to cache for next run
+
+    print(f"  mention_by_video built: {len(result)} videos with claim-level mention data")
+
     if use_cache:
         cache_key = _compute_mention_cache_key(db)
         _save_mention_cache(cache_key, result)
-    
+
+    # Temporary debug
+    sample = list(result.items())[:3]
+    print(f"  Sample mention_by_video keys: {sample}")
+
     return result
 
 
@@ -282,7 +292,7 @@ def _load_from_mongo() -> tuple[list[dict], dict[str, list[dict]], dict[str, int
     
     print(f"  Loaded {len(raw_comments)} comments from MongoDB")
 
-    # Build per-video mention count via full narrative join (with caching optimization)
+    # Build per-video mention count directly from claims (with caching optimization)
     mention_by_video = _build_mention_by_video(db, use_cache=True)
 
     print(f"Source: MongoDB ({db_name})")
@@ -570,6 +580,10 @@ def run_trend_scoring(upsert_data: bool = True) -> list[dict]:
     print("Loading data...")
 
     videos, comments_by_video, mention_by_video, db = load_data()
+
+    # Debug:
+    print("DEBUG: first 3 video _ids:", [str(v["_id"]) for v in videos[:3]])
+    print("DEBUG: first 3 mention keys:", list(mention_by_video.keys())[:3])
 
     print(f"Videos loaded: {len(videos)}")
     print(f"Videos with mention data: {len(mention_by_video)}")
