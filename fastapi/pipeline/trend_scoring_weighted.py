@@ -39,8 +39,8 @@ CACHE_PATH = BASE_DIR / "data" / ".mention_cache.json"
 
 TRENDING_THRESHOLD    = 0.40   # updated to 0.40 from evaluation from week 6
 RECENCY_WINDOW_DAYS   = 30
-ENGAGEMENT_CEILING    = 0.10   # normalize engagement rate against a 10% cap
-MENTION_COUNT_CEILING = 500    # normalize mention count (will tune later during eval)
+ENGAGEMENT_CEILING    = 0.08   # normalize engagement rate against a 8% cap
+MENTION_COUNT_CEILING = 250    # normalize mention count tuned
 BATCH_SIZE = 1000
 
 WEIGHTS = {

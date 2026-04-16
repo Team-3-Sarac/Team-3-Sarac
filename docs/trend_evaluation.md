@@ -248,19 +248,17 @@ before proceeding to score new content. The LLM approach has too much risk of ha
 
 ## 9. LLM Claims Layer Status
 
-Claim extraction pipeline is under development (LLM Integration Layer task). Once operational, `comment_quality` in the algorithmic scorer will be replaced by 
-`trends.mention_count` which is the claim frequency per narrative within a time window.
+As of week 9, `comment_quality` in the algorithmic scorer has been replaced by `trends.mention_count` which is the claim frequency per narrative within a time window.
 
 ---
 
 ## 10. Inconsistencies & Cross-Team Feedback
 
-| # | Finding                                                                              | Severity | Team       | Action                                                                      |
-|---|--------------------------------------------------------------------------------------|----------|------------|-----------------------------------------------------------------------------|
-| 1 | `league` and `teams` fields are `null` for all videos in DB                          | High     | Backend    | Populate during ingestion pipeline                                          |
-| 2 | Non-soccer and short-form clips passing through ingestion inflate algo scores        | High     | Backend    | Add `duration_seconds >= X` filter and soccer content check during scraping |
-| 3 | LLM penalizes videos dated after its training cutoff as outdated                     | Medium   | DS         | Pass current run date explicitly in system prompt to fix recency evaluation |
- 
+| # | Finding                                                                       | Severity | Team    | Action                                                                      | Complete?       |
+|---|-------------------------------------------------------------------------------|----------|---------|-----------------------------------------------------------------------------|-----------------|
+| 1 | `league` and `teams` fields are `null` for all videos in DB                   | High     | Backend | Populate during ingestion pipeline                                          | Yes (end of W9) |
+| 2 | Non-soccer and short-form clips passing through ingestion inflate algo scores | High     | Backend | Add `duration_seconds >= X` filter and soccer content check during scraping | Yes             |
+| 3 | LLM penalizes videos dated after its training cutoff as outdated              | Medium   | DS      | Pass current run date explicitly in system prompt to fix recency evaluation | Yes             |
 
 ---
 
@@ -297,67 +295,138 @@ improvements to address date context and popularity bias.
 
 ## 13. Final 0.40 Threshold Validation & Weight Configurations
 
-**Date:** 4/4/2026  
+**Date:** 4/16/2026  
 **Scorer Version:** trend_scoring_weighted.py (optimized with batch processing + caching via PR 39)  
-**Validation Method:** Manual review of 5 diverse videos at score boundary (0.38-0.45 range)  
+**Validation Method:** Manual review of 5 diverse videos with mention_scores  
 
 ---
 
 ### Manual Video Review Results
 
-#### Video 1: Atlético Madrid vs. Tottenham: Extended Highlights | UCL Round of 16 - Leg 1 | CBS Sports Golazo
-| Metric                | Value        | Analysis                                                                                    |
-|-----------------------|--------------|---------------------------------------------------------------------------------------------|
-| **Trend Score**       | 0.2483       | Dropped from 0.6304 -> 0.2483 over 2 weeks                                                  |
-| **League**            | UCL          |                                                                                             |
-| **Views**             | 690,909      |                                                                                             |
-| **Engagement Rate**   | 0.1195       |                                                                                             |
-| **Recency Score**     | 0.1882       |                                                                                             |
-| **Mention Score**     | 0.0          | Still have failed deployment so cannot capture this score                                   |
-| **Views Normalized**  | 1.0          |                                                                                             |
-| **Publish Date**      | 2026-03-10   | 25 days old                                                                                 |
-| **Manual Assessment** | Non-trending | Correctly shows it as non-trending (was trending prev) due to recency score decay over time |
+#### Video 1: Colombia vs. France EXTENDED HIGHLIGHTS [March 29, 2026] | Full Game Highlights | ESPN FC
+| Metric                | Value      | Analysis                                                                                                     |
+|-----------------------|------------|--------------------------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.2691     | Below threshold despite strong mention and recency signals                                                   |
+| **League**            | -          | International match content so no league                                                                     |
+| **Views**             | 66813      | Solid views but not 100k+                                                                                    |
+| **Engagement Rate**   | 0.0504     | Very low engagement rate                                                                                     |
+| **Recency Score**     | 0.4572     | Penalized for being a bit older, recency working as intended                                                 |
+| **Mention Score**     | 0.458      | Highest observed mention_score                                                                               |
+| **Views Normalized**  | 0.1515     | Moderate views                                                                                               |
+| **Publish Date**      | 2026-03-30 | Outside peak recency window                                                                                  |
+| **Manual Assessment** | -          | High narrative relevance but correctly deemed not trending due to low engagement and moderate recency scores |
 
 **Component Analysis:**
-- Engagement rate: High and appropriate for this content type and match context.
-- Recency: Recency decay is fair and optimal for this example. Was previously trending in past runs.
-- Mention score: Narrative buzz is absent due to failed deployment issues.
-- Views: Very high view count compared to other videos in dataset.
+- Engagement rate: Very weak, limits trend potential  
+- Recency: Major penalty, but working as intended  
+- Mention score: Extremely strong signal (likely narrative-heavy, international match)  
+- Views: Moderate support, view normalization is good  
 
 ---
 
-#### Video 2: Galatasaray vs. Liverpool: Extended Highlights | UCL Round of 16 - Leg 1 | CBS Sports Golazo
-| Metric                | Value        | Analysis                                                                                    |
-|-----------------------|--------------|---------------------------------------------------------------------------------------------|
-| **Trend Score**       | 0.1687       | Dropped from 0.4126 -> 0.1687 over 2 weeks                                                  |
-| **League**            | UCL          |                                                                                             |
-| **Views**             | 351,373      |                                                                                             |
-| **Engagement Rate**   | 0.1070       |                                                                                             |
-| **Recency Score**     | 0.1850       |                                                                                             |
-| **Mention Score**     | 0.0          | Still have failed deployment so cannot capture this score                                   |
-| **Views Normalized**  | 0.5049       |                                                                                             |
-| **Publish Date**      | 2026-03-10   | 25 days old                                                                                 |
-| **Manual Assessment** | Non-trending | Correctly shows it as non-trending (was trending prev) due to recency score decay over time |
+#### Video 2: Germany vs. Ghana Reaction: Why is Florian Wirtz playing better with the national team? | ESPN FC
+| Metric                | Value      | Analysis                                                                             |
+|-----------------------|------------|--------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.2645     | Below trending threshold due to low engagement and views                             |
+| **League**            | -          | Reaction/discussion surrounding international matches                                |
+| **Views**             | 23,686     | Moderate to low view count                                                           |
+| **Engagement Rate**   | 0.1853     | Good engagement rate                                                                 |
+| **Recency Score**     | 0.4693     | Penalized for being a bit older, recency working as intended                         |
+| **Mention Score**     | 0.26       | High mention score, shows component is working as intended and valid                 |
+| **Views Normalized**  | 0.0457     | Low view count                                                                       |
+| **Publish Date**      | 2026-03-30 | Outside peak recency window                                                          |
+| **Manual Assessment** | -          | Strong discussion signal but not broadly trending in regards to engagement and views |
 
 **Component Analysis:**
-- Engagement rate: High and appropriate for this content type and match context.
-- Recency: Recency decay is fair and optimal for this example. Was previously trending in past runs under new threshold.
-- Mention score: Narrative buzz is absent due to failed deployment issues.
-- Views: Decently high view count with good engagement rate.
+- Engagement rate: Strong and score accurately reflects that  
+- Recency: Holding it back, would increase trend potential if more recent  
+- Mention score: Clearly impactful and valid, contributes well to composite score  
+- Views: Too low to push over trending threshold  
 
 ---
 
+#### Video 3: Ranking 2026 World Cup FAVORITES
+| Metric                | Value      | Analysis                                                                                                                       |
+|-----------------------|------------|--------------------------------------------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.3143     | Below threshold mostly due to views, but very near-trending                                                                    |
+| **League**            | -          | Broad narrative international topic                                                                                            |
+| **Views**             | 7,137      | Very low view count but still >5000 as required                                                                                |
+| **Engagement Rate**   | 0.3209     | Very strong engagement rate                                                                                                    |
+| **Recency Score**     | 0.468      | Penalized for being a bit older, recency working as intended                                                                   |
+| **Mention Score**     | 0.304      | High mention score, component is working with the given ceiling, might need to lower to capture top half of range consistently |
+| **Views Normalized**  | 0.0051     | Very low normalized view count, main reason it is not classified as trending                                                   |
+| **Publish Date**      | 2026-03-30 | Outside peak recency window                                                                                                    |
+| **Manual Assessment** | -          | High narrative and engagement but limited by viewership component                                                              |
+
+**Component Analysis:**
+- Engagement rate: Excellent engagement rate  
+- Recency: Weaker score due to being ~2 weeks old, recency still working great at current calibration  
+- Mention score: Strong narrative driver, can reduce ceiling down to capture the top half of the range (consider 300?)  
+- Views: Main limiting factor as to why it is not trending  
+
+---
+
+#### Video 4: BOSNIA QUALIFY FOR THE 2026 FIFA WORLD CUP | Italy Misses Third Consecutive World Cup...
+| Metric                | Value      | Analysis                                                                                                                   |
+|-----------------------|------------|----------------------------------------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.3136     | Below threshold mostly due to views, but very near-trending                                                                |
+| **League**            | -          | Broad narrative international topic                                                                                        |
+| **Views**             | 20,982     | Moderate view count                                                                                                        |
+| **Engagement Rate**   | 0.377      | Very strong engagement rate                                                                                                |
+| **Recency Score**     | 0.5033     | Penalized for being a bit older, recency working as intended                                                               |
+| **Mention Score**     | 0.124      | Moderate mention score, component is working with the given ceiling, another candidate for benefiting from a lower ceiling |
+| **Views Normalized**  | 0.0391     | Very low normalized view count, main reason it is not classified as trending                                               |
+| **Publish Date**      | 2026-03-31 | Outside peak recency window                                                                                                |
+| **Manual Assessment** | -          | Strong candidate, borderline trending video                                                                                |
+
+**Component Analysis:**
+- Engagement rate: Excellent engagement rate  
+- Recency: Weaker score due to being ~2 weeks old, recency still working great at current calibration  
+- Mention score: Meaningful mention score but not dominant, would benefit from lower ceiling as well  
+- Views: Not high enough to be considered trending  
+
+---
+
+#### Video 5: Scotland vs. Ivory Coast | Full Game Highlights | ESPN FC
+| Metric                | Value      | Analysis                                                                                                                   |
+|-----------------------|------------|----------------------------------------------------------------------------------------------------------------------------|
+| **Trend Score**       | 0.2743     | Below threshold mostly due to engagement rate and moderate narrative buzz, but very near-trending due to views             |
+| **League**            | -          | Broad narrative international topic                                                                                        |
+| **Views**             | 152,437    | High view count                                                                                                            |
+| **Engagement Rate**   | 0.1299     | Moderate engagement rate, reflects appropriately                                                                           |
+| **Recency Score**     | 0.5008     | Penalized for being a bit older, recency working as intended                                                               |
+| **Mention Score**     | 0.122      | Moderate mention score, component is working with the given ceiling, another candidate for benefiting from a lower ceiling |
+| **Views Normalized**  | 0.3615     | Strong view count, primary trending driver                                                                                 |
+| **Publish Date**      | 2026-03-31 | Outside peak recency window                                                                                                |
+| **Manual Assessment** | -          | Strong reach, but has a weaker narrative signal and engagement rate lowering composite score                               |
+
+**Component Analysis:**
+- Engagement rate: Decent rate but could be better, score is accurate and reflects well in pipeline  
+- Recency: Weaker score due to being ~2 weeks old, recency still working great at current calibration  
+- Mention score: Meaningful mention score but not dominant, would benefit from lower ceiling as well  
+- Views: Primary driver behind videos push to be classified as trending  
+
+---
+
+### Key Takeaways
+- Mention score clearly differentiates narrative-heavy content (rankings, reactions, previews) from pure highlights  
+- However, mention score alone is not sufficient to push videos above 0.40  
+  - The system is behaving correctly:  
+      - Narrative videos = high mention, lower views → near-trending but not trending unless views/engagement tick up  
+      - Match highlights = high views, low mention → trending  
+
+--- 
 ### Final Production Weight Configuration
 
 #### Approved Parameters
 
-| Parameter                 | Value     | Justification                                                                                                      |
-|---------------------------|-----------|--------------------------------------------------------------------------------------------------------------------|
-| **TRENDING_THRESHOLD**    | 0.40      | Captures high-profile UCL/PL matches without excessive false positives                                             |
-| **ENGAGEMENT_CEILING**    | 0.08 (8%) | Typical soccer engagement is 0.5-5% so we lowered it from 10% -> 8% to prevent viral outliers from dominating      |
-| **RECENCY_WINDOW_DAYS**   | 30        | Balances fresh content priority with long-tail video discovery                                                     |
-| **MENTION_COUNT_CEILING** | 500       | Normalized based on observed narrative mention distribution, unable to calibrate due to deployment issues          |
-| **BATCH_SIZE**            | 1000      | Optimal for memory efficiency on 10K+ video datasets, can be considered for future calibrations when dataset grows |
+| Parameter                 | Value     | Justification                                                                                                            |
+|---------------------------|-----------|--------------------------------------------------------------------------------------------------------------------------|
+| **TRENDING_THRESHOLD**    | 0.40      | Captures high-profile matches and excludes niche narrative content unless high view count and engagement rate is present |
+| **ENGAGEMENT_CEILING**    | 0.08 (8%) | Typical soccer engagement is 0.5-5% so we lowered it from 10% -> 8% to prevent viral outliers from dominating            |
+| **RECENCY_WINDOW_DAYS**   | 30        | Balances fresh content priority with long-tail video discovery, still appropriate based on observed decay                |
+| **MENTION_COUNT_CEILING** | 250       | Based on observed max (~230), this provides headroom without compressing distribution                                    |
+| **BATCH_SIZE**            | 1000      | Optimal for memory efficiency on 10K+ video datasets, can be considered for future calibrations when dataset grows       |
 
 #### Approved Component Weights
 
@@ -377,6 +446,5 @@ improvements to address date context and popularity bias.
 | **Weekly**    | After orchestrator runs     | Review top 10 trending videos for obvious false positives |
 | **Monthly**   | Dataset grows significantly | Re-run sensitivity analysis on thresholds/ceilings        |
 | **Quarterly** | Major pipeline changes      | Full manual review of 20+ boundary videos                 |
-| **On-demand** | mention_score goes live     | Rebalance weights to account for new signal strength      |
 
 ---
