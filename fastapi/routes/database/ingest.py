@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pymongo import UpdateOne
@@ -39,20 +40,22 @@ async def _build_channel_id_lookup() -> dict[str, object]:
         lookup[doc["channel_id"]] = doc["_id"]
     return lookup
 
-async def _refresh_channel_metadata(channel_ids: list[str]):
-    """Recalculate video_count and latest_video for specific channels."""
-    for c_id in channel_ids:
-        # Find the latest video from this channel in our DB
+async def _refresh_channel_metadata(channel_oids: list[ObjectId]):
+    """Recalculate video_count and latest_video for specific channels by ObjectId."""
+
+    async def refresh_single(c_oid: ObjectId):
+        # 1. Find the latest video linked to this channel ObjectId
         latest_video = await db.videos.find_one(
-            {"channel_id": c_id},
+            {"channel_id": c_oid},
             sort=[("publish_date", -1)]
         )
 
         if latest_video:
-            video_count = await db.videos.count_documents({"channel_id": c_id})
+            video_count = await db.videos.count_documents({"channel_id": c_oid})
 
+            # 2. Update using _id (the fastest index)
             await db.channels.update_one(
-                {"channel_id": c_id},
+                {"_id": c_oid},
                 {"$set": {
                     "video_count": video_count,
                     "latest_title": latest_video["title"],
@@ -60,6 +63,10 @@ async def _refresh_channel_metadata(channel_ids: list[str]):
                     "updated_at": datetime.now(timezone.utc)
                 }}
             )
+
+    # Run all refreshes in parallel
+    if channel_oids:
+        await asyncio.gather(*(refresh_single(oid) for oid in channel_oids))
 
 
 # ============== Ingestion Endpoints ==============
@@ -109,6 +116,29 @@ async def ingest_channels(channels: list[Channel]):
 
     return {"status": "success", "processed": processed_count}
 
+@router.post("/channels/refresh")
+async def refresh_active_channels():
+    """
+    Public endpoint to trigger the existing _refresh_channel_metadata logic 
+    for all active channels in the database.
+    """
+    try:
+        # Get all channel IDs currently marked as active
+        active_channels = await db.channels.distinct("_id", {"active": True})
+
+        if not active_channels:
+            return {"status": "success", "refreshed_count": 0}
+
+        # Call your existing internal helper function
+        await _refresh_channel_metadata(active_channels)
+
+        return {
+            "status": "success",
+            "refreshed_count": len(active_channels)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/videos")
 async def ingest_videos(videos: list[Video]):
     """Ingest video metadata into the database and link to channels.
@@ -121,6 +151,7 @@ async def ingest_videos(videos: list[Video]):
 
     upserted = 0
     modified = 0
+    affected_channel_oids = set()
 
     for v in videos:
         doc = v.model_dump(by_alias=True, exclude_none=True)
@@ -128,6 +159,7 @@ async def ingest_videos(videos: list[Video]):
         c_oid = channel_lookup.get(v.channel_id)
         if c_oid:
             doc["channel_id"] = c_oid
+            affected_channel_oids.add(c_oid)
 
         # Convert incoming ISO strings to datetime objects
         if isinstance(doc.get("publish_date"), str):
@@ -154,8 +186,8 @@ async def ingest_videos(videos: list[Video]):
         else:
             modified += result.modified_count
 
-    affected_channels = list(set([v.channel_id for v in videos]))
-    await _refresh_channel_metadata(affected_channels)
+    if affected_channel_oids:
+        await _refresh_channel_metadata(list(affected_channel_oids))
 
     return {"upserted": upserted, "modified": modified}
 
