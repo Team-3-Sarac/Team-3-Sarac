@@ -1,3 +1,20 @@
+"""
+Data Validation Script for Claims
+
+Purpose:
+- validates claim data integrity before narrative processing
+- detects malformed claims (missing fields, invalid structure)
+- identifys broken links 
+- detects duplicates and logs inconsistencies for debugging and monitoring
+
+Usage:
+    python fastapi/pipeline/data_validation.py
+
+Notes:
+- This script is used during pipeline execution and for manual validation.
+- Designed to ensure clean input for narrative clustering and trend analysis.
+"""
+
 from routes.database.database import db
 from bson import ObjectId
 

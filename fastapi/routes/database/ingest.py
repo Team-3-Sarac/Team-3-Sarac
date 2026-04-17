@@ -10,6 +10,7 @@ from .schema import (
     DashboardKPIs, LeagueStats, ChannelStats
 )
 from typing import Optional
+import re
 
 router = APIRouter()
 
@@ -155,6 +156,59 @@ async def ingest_videos(videos: list[Video]):
 
     for v in videos:
         doc = v.model_dump(by_alias=True, exclude_none=True)
+
+        # logic - league detection , pulls the title and channel_name 
+        # fields from the document and sets to empty strings if missing 
+        title = doc.get("title", "")
+        channel = doc.get("channel_name", "")
+
+        # league rules 
+        title_lower = title.lower()
+        if "ucl" in title_lower or "champions league" in title_lower:
+            doc["league"] = "Champions League"
+        elif "premier league" in title_lower:
+            doc["league"] = "Premier League"
+        elif "laliga" in title_lower or "la liga" in title_lower:
+            doc["league"] = "La Liga"
+        elif "golazo" in channel.lower():
+            doc["league"] = "Champions League"
+        else:
+            doc["league"] = None
+            
+        # team extraction
+     
+        KNOWN_TEAMS = [
+             # Premier League
+            'Arsenal', 'Chelsea', 'Liverpool', 'Manchester City', 'Manchester United',
+            'Tottenham', 'Newcastle', 'Aston Villa', 'Brighton', 'Fulham',
+            'Wolves', 'Everton', 'Brentford', 'Crystal Palace', 'Wrexham', 'Leeds United',
+             # La Liga
+            'Real Madrid', 'Barcelona', 'Atletico Madrid', 'Athletic Club',
+            'Real Sociedad', 'Sevilla', 'Valencia', 'Villarreal', 'Getafe', 'Celta Vigo',
+            'Girona', 'Levante', 'Real Betis',
+             # Bundesliga
+            'Bayern Munich', 'Borussia Dortmund', 'Borussia Monchengladbach',
+            'RB Leipzig', 'Bayer Leverkusen', 'Eintracht Frankfurt', 'Wolfsburg',
+             # Serie A
+            'Juventus', 'AC Milan', 'Inter Milan', 'Napoli', 'Roma', 'Lazio',
+            # Ligue 1
+            'PSG', 'Monaco', 'Lyon', 'Marseille', 'Toulouse', 'Nice',
+            # UCL/other
+            'Sporting', 'Benfica', 'Porto', 'Ajax', 'Celtic', 'Rangers',
+            'Galatasaray', 'Fenerbahce', 'Besiktas',
+        ]
+
+        vs_match = re.search(
+             r'^(.+?)\s(?:vs?\.?)\s(.+?)(?:\s[-|].*)?$',
+            title, re.IGNORECASE
+        )
+        if vs_match:
+            teams = [vs_match.group(1).strip(), vs_match.group(2).strip()]
+        else:
+              teams = [t for t in KNOWN_TEAMS if t.lower() in title.lower()]
+
+        doc["teams"] = teams if teams else None
+
         # Resolve channel_id to its MongoDB ObjectId if it exists
         c_oid = channel_lookup.get(v.channel_id)
         if c_oid:
