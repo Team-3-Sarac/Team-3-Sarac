@@ -9,7 +9,7 @@ type ChannelRowData = {
   subs: string;
   league: string;
   videos: number;
-  sentimentPct: number;
+  sentimentPct: number | null;
   sentimentDir: "up" | "down" | "flat";
   latestTitle: string;
   latestViews: string;
@@ -19,8 +19,8 @@ type ChannelRowData = {
 };
 
 function getSentimentLabel(pct: number): string {
-  if (pct >= 60) return "Positive";
-  if (pct >= 40) return "Neutral";
+  if (pct >= 0.6) return "Positive";
+  if (pct >= 0.4) return "Neutral";
   return "Negative";
 }
 
@@ -84,7 +84,8 @@ export default function ChannelRow({
   onRiskClick?: () => void;
 }) {
   const sentimentTone =
-    row.sentimentPct >= 60 ? "pos" : row.sentimentPct >= 40 ? "neu" : "neg";
+    row.sentimentPct == null ? "neu" :
+    row.sentimentPct >= 0.6 ? "pos" : row.sentimentPct >= 0.4 ? "neu" : "neg";
 
   const SentimentIcon =
     row.sentimentDir === "up"
@@ -134,7 +135,7 @@ export default function ChannelRow({
       <div className="col-span-1 flex items-center justify-end gap-2">
         <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums ${sentimentColor}`}>
           <SentimentIcon className="h-3 w-3 shrink-0" />
-          {row.sentimentPct}%
+          {row.sentimentPct != null ? `${Math.round(row.sentimentPct * 100)}%` : "N/A"}
         </span>
       </div>
 

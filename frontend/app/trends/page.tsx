@@ -85,6 +85,14 @@ function getTopicLeague(trend: Trend): string[] {
 }
 
 function getNarrativeCategory(trend: Trend, narratives: Narrative[]): string | null {
+  const scores: Record<string, number> = {
+    transfers: (trend as any).transfers ?? 0,
+    injuries: (trend as any).injuries ?? 0,
+    tactics: (trend as any).tactics ?? 0,
+    controversy: (trend as any).controversy ?? 0,
+  };
+  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+  if (top && top[1] > 0) return top[0];
   const narrative = narratives.find((n) => n.id === trend.narrative_id);
   return narrative?.category || trend.category || null;
 }
@@ -188,10 +196,8 @@ function MiniBar({ value, tone }: { value: number; tone: "pos" | "neg" | "neu" |
 }
 
 function EnhancedClaimRow({ claim }: { claim: Claim }) {
-  const sentimentPct =
-    claim.sentiment_pct ??
-    (claim.sentiment === "positive" ? 72 : claim.sentiment === "negative" ? 28 : 50);
-  const confidenceScore = claim.confidence_score ?? 70;
+  const sentimentPct = claim.sentiment_pct != null ? claim.sentiment_pct * 100 : null;
+  const confidenceScore = claim.confidence_score ?? null;
   const mentionsPct = Math.min((claim.mentions ?? 0) / 50 * 100, 100);
   const sentimentTone: "pos" | "neg" | "neu" =
     claim.sentiment === "positive" ? "pos" : claim.sentiment === "negative" ? "neg" : "neu";
@@ -207,8 +213,8 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
             <Badge tone={getSentimentBadgeTone(claim.sentiment)}>
               {getSentimentLabel(claim.sentiment)}
             </Badge>
-            <Badge tone={confidenceScore >= 70 ? "pos" : confidenceScore >= 40 ? "neu" : "neg"}>
-              {confidenceScore >= 70 ? "High Confidence" : confidenceScore >= 40 ? "Med Confidence" : "Low Confidence"}
+            <Badge tone={confidenceScore == null ? "neu" : confidenceScore >= 0.7 ? "pos" : confidenceScore >= 0.4 ? "neu" : "neg"}>
+              {confidenceScore == null ? "Unknown" : confidenceScore >= 0.7 ? "High Confidence" : confidenceScore >= 0.4 ? "Med Confidence" : "Low Confidence"}
             </Badge>
             {claim.mentions !== undefined && claim.mentions > 0 && (
               <span className="text-[11px] text-neutral-500">
@@ -220,11 +226,11 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
         <div className="shrink-0 flex flex-col gap-2 pt-0.5">
           <div className="flex items-center gap-3">
             <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Sentiment</span>
-            <MiniBar value={sentimentPct} tone={sentimentTone} />
+            <MiniBar value={sentimentPct ?? 0} tone={sentimentTone} />
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Confidence</span>
-            <MiniBar value={confidenceScore} tone="conf" />
+            <MiniBar value={confidenceScore != null ? confidenceScore * 100 : 0} tone="conf" />
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Mentions</span>

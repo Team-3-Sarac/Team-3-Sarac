@@ -91,7 +91,7 @@ export default function LandingPage() {
 
   const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
   const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
-  const animatedSentiment = useCountUp(kpis?.avg_sentiment     ?? null);
+  const animatedSentiment = useCountUp(kpis ? kpis.avg_sentiment * 100 : null);
   const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
 
   useEffect(() => {
@@ -122,8 +122,8 @@ export default function LandingPage() {
       title: "Avg. Sentiment",
       value: kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—",
       sub: kpisError ? "Failed to load" : kpis
-        ? kpis.avg_sentiment >= 60 ? "Positive overall"
-        : kpis.avg_sentiment >= 40 ? "Neutral overall"
+        ? kpis.avg_sentiment >= 0.6 ? "Positive overall"
+        : kpis.avg_sentiment >= 0.4 ? "Neutral overall"
         : "Negative overall"
         : "Loading…",
     },
