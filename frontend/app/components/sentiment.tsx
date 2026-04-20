@@ -6,7 +6,7 @@ export default function Sentiment({
   dir: "up" | "down" | "flat";
 }) {
   const cls =
-    pct >= 70 ? "text-emerald-400" : pct >= 60 ? "text-sky-400" : pct >= 50 ? "text-amber-400" : "text-red-400";
+    pct >= 0.7 ? "text-emerald-400" : pct >= 0.6 ? "text-sky-400" : pct >= 0.5 ? "text-amber-400" : "text-red-400";
 
   const arrow =
     dir === "up" ? "↗" : dir === "down" ? "↘" : "–";

@@ -54,6 +54,7 @@ type VideoData = {
   comment_count: number;
   duration_seconds: number;
   publish_date: string;
+  sentiment_pct: number | null;
 };
 
 type Event = {
@@ -120,14 +121,14 @@ function getRelativeTime(dateStr: string): string {
 }
 
 function getSentimentTone(val: number): "pos" | "neu" | "neg" {
-  if (val >= 60) return "pos";
-  if (val >= 40) return "neu";
+  if (val >= 0.6) return "pos";
+  if (val >= 0.4) return "neu";
   return "neg";
 }
 
 function getSentimentLabel(value: number) {
-  if (value >= 60) return "Positive";
-  if (value >= 40) return "Neutral";
+  if (value >= 0.6) return "Positive";
+  if (value >= 0.4) return "Neutral";
   return "Negative";
 }
 
@@ -224,7 +225,7 @@ export default function DashboardPage() {
   const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
   const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
   const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
-  const animatedSentiment = useCountUp(kpis?.avg_sentiment     ?? null);
+  const animatedSentiment = useCountUp(kpis ? kpis.avg_sentiment * 100 : null);
 
   useEffect(() => {
     async function fetchData() {
@@ -278,7 +279,9 @@ export default function DashboardPage() {
         const formatted = (sentimentRes.value.weeks || []).map(
           (w: any, i: number) => ({
             ...w,
-            week: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7] || w.week,
+            week: w.week || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i % 7],
+            positive: (w.positive ?? 0) * 100,
+            negative: (w.negative ?? 0) * 100,
           })
         );
         setSentimentHistory(formatted);
@@ -482,8 +485,8 @@ export default function DashboardPage() {
                     key={video.video_id}
                     videoId={video.video_id}
                     league={video.league || "Unknown"}
-                    sentiment={`${Math.round(kpis?.avg_sentiment ?? 0)}%`}
-                    sentimentTone={sentimentTone}
+                    sentiment={video.sentiment_pct != null ? `${Math.round(video.sentiment_pct * 100)}%` : "N/A"}
+                    sentimentTone={video.sentiment_pct != null ? (video.sentiment_pct >= 0.6 ? "pos" : video.sentiment_pct >= 0.4 ? "neu" : "neg") : "neu"}
                     title={video.title}
                     channel={video.channel_name || "Unknown channel"}
                     duration={formatDuration(video.duration_seconds)}

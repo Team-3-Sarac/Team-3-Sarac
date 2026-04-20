@@ -36,7 +36,7 @@ type ChannelRowData = {
   subs: string;
   league: string;
   videos: number;
-  sentimentPct: number;
+  sentimentPct: number | null;
   sentimentDir: "up" | "down" | "flat";
   latestTitle: string;
   latestViews: string;
@@ -153,7 +153,7 @@ export default function ChannelsPage() {
 
   const animatedChannels  = useCountUp(channels.length > 0 ? channels.length : null);
   const animatedVideos    = useCountUp(kpis?.videos_analyzed ?? null);
-  const animatedSentiment = useCountUp(kpis?.avg_sentiment ?? null);
+  const animatedSentiment = useCountUp(kpis ? kpis.avg_sentiment * 100 : null);
 
   const avgRiskScore = rows.length > 0 && rows.some(r => r.riskScore !== null)
     ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.filter(r => r.riskScore !== null).length)
@@ -202,10 +202,10 @@ export default function ChannelsPage() {
           const channelVideos =
             videosRes.value.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
           const latestVideo = channelVideos[0];
-          const avgSentiment = Math.min(
-            95,
-            Math.max(30, 60 + Math.round((c.total_likes / Math.max(c.total_views, 1)) * 100))
-          );
+          const videosWithSentiment = channelVideos.filter((v: any) => v.sentiment_score != null);
+          const avgSentiment = videosWithSentiment.length > 0
+            ? videosWithSentiment.reduce((sum: number, v: any) => sum + v.sentiment_score, 0) / videosWithSentiment.length
+            : null;
           const riskData = riskMap.get(c.channel_id);
 
           return {
@@ -217,7 +217,7 @@ export default function ChannelsPage() {
             league: getMostCommonLeague(channelVideos),
             videos: c.video_count,
             sentimentPct: avgSentiment,
-            sentimentDir: avgSentiment > 70 ? "up" : avgSentiment < 50 ? "down" : "flat",
+            sentimentDir: avgSentiment == null ? "flat" : avgSentiment > 0.6 ? "up" : avgSentiment < 0.4 ? "down" : "flat",
             latestTitle: latestVideo?.title || "No recent videos",
             latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
             active: true,
@@ -326,8 +326,8 @@ export default function ChannelsPage() {
               kpisError ? "Failed to load" :
               loading ? "Loading…" :
               kpis
-                ? kpis.avg_sentiment >= 60 ? "Positive overall"
-                : kpis.avg_sentiment >= 40 ? "Neutral overall"
+                ? kpis.avg_sentiment >= 0.6 ? "Positive overall"
+                : kpis.avg_sentiment >= 0.4 ? "Neutral overall"
                 : "Negative overall"
                 : "—"
             }
