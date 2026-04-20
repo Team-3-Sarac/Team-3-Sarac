@@ -26,6 +26,7 @@ def _require_api_key():
 VIEW_THRESHOLD = 5000
 DAYS_BACK = 7 # changed to 7 for weekly updates
 MAX_PER_CHANNEL = 120
+MIN_DURATION_SECONDS = 60 # vioeo must be > 60 seconds in duration
 KEYWORDS = [
     "transfer", "trade", "rumor", "news", "update", "signing",
     "highlight", "highlights", "goal", "vs", "match", "analysis", "recap",
@@ -117,7 +118,8 @@ def filter_by_views(client, video_ids):
         for item in response["items"]:
             stats = item["statistics"]
             views = int(stats.get("viewCount", 0))
-            if views > VIEW_THRESHOLD:
+            duration = parse_duration(item["contentDetails"]["duration"])
+            if views > VIEW_THRESHOLD and duration > MIN_DURATION_SECONDS:
                 snippet = item["snippet"]
                 now = datetime.now(timezone.utc).isoformat()
                 filtered.append({
@@ -132,7 +134,7 @@ def filter_by_views(client, video_ids):
                     "view_count": views,
                     "like_count": int(stats.get("likeCount", 0)),
                     "comment_count": int(stats.get("commentCount", 0)),
-                    "duration_seconds": parse_duration(item["contentDetails"]["duration"]),
+                    "duration_seconds": duration,
                     "summary": None,
                     "sentiment_pct": 0.5, # Added for schema compliance
                     "created_at": now,
@@ -150,7 +152,7 @@ def process_channel(channel_id, days_back, keywords, exclude_keywords):
         print(f"Recent (<= {days_back} days) for {channel_id}: {len(recent_videos)}")
         filtered_videos = filter_by_views(client, recent_videos)
 
-        print(f"Passed view filter (>5000) for {channel_id}: {len(filtered_videos)}")
+        print(f"Passed filters (views > {VIEW_THRESHOLD}, duration > {MIN_DURATION_SECONDS} seconds) for {channel_id}: {len(filtered_videos)}")
         return filtered_videos
 
     except Exception as e:
@@ -163,7 +165,8 @@ async def ingest_from_channels(channel_ids, days_back, keywords, exclude_keyword
     Iterates through a list of channels to retrieve and filter relevant videos.
 
     For each channel, it gets the uploads playlist, retrieves relevant video IDs
-    from the last 6 months (filtered by keywords), and keeps videos with > 5000 views.
+    from the last week (filtered by keywords), and keeps videos with > 5000 views
+    and duration > 60 seconds.
 
     Returns:
         list: A list of dictionaries containing video IDs and relevant metadata.
