@@ -156,6 +156,7 @@ async def ingest_videos(videos: list[Video]):
 
     for v in videos:
         doc = v.model_dump(by_alias=True, exclude_none=True)
+        doc.pop("_id", None)
 
         # logic - league detection , pulls the title and channel_name 
         # fields from the document and sets to empty strings if missing 
@@ -165,15 +166,15 @@ async def ingest_videos(videos: list[Video]):
         # league rules 
         title_lower = title.lower()
         if "ucl" in title_lower or "champions league" in title_lower:
-            doc["league"] = "Champions League"
+            doc["league"] = ["Champions League"]
         elif "premier league" in title_lower:
-            doc["league"] = "Premier League"
+            doc["league"] = ["Premier League"]
         elif "laliga" in title_lower or "la liga" in title_lower:
-            doc["league"] = "La Liga"
+            doc["league"] = ["La Liga"]
         elif "golazo" in channel.lower():
-            doc["league"] = "Champions League"
+            doc["league"] = ["Champions League"]
         else:
-            doc["league"] = None
+            doc["league"] = []
             
         # team extraction
      
@@ -198,16 +199,22 @@ async def ingest_videos(videos: list[Video]):
             'Galatasaray', 'Fenerbahce', 'Besiktas',
         ]
 
-        vs_match = re.search(
-             r'^(.+?)\s(?:vs?\.?)\s(.+?)(?:\s[-|].*)?$',
-            title, re.IGNORECASE
-        )
-        if vs_match:
-            teams = [vs_match.group(1).strip(), vs_match.group(2).strip()]
-        else:
-              teams = [t for t in KNOWN_TEAMS if t.lower() in title.lower()]
+        #vs_match = re.search(
+        #  r'^(.+?)\s(vs?|v\.?)\s(.+?)(?:\s[\-|].*)?$',
+        #  title,
+        #  re.IGNORECASE
+        #)
 
-        doc["teams"] = teams if teams else None
+        
+        teams = [t for t in KNOWN_TEAMS if t.lower() in title.lower()]
+        teams = teams[:2]
+
+        doc["teams"] = teams if teams else []
+        
+        #for debugging
+        print("TITLE:", title)
+        print("LEAGUE:", doc["league"])
+        print("TEAMS:", doc["teams"])
 
         # Resolve channel_id to its MongoDB ObjectId if it exists
         c_oid = channel_lookup.get(v.channel_id)

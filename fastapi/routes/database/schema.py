@@ -52,7 +52,8 @@ class MeasurementID(BaseModel):
 # ============== Base Models ==============
 
 class Video(BaseModel):
-    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    model_config = {"populate_by_name": True}
+    id: Optional[PyObjectId] = Field(alias="_id", default=None, exclude=True)
     youtube_video_id: str = Field(..., unique=True)
     title: str
     thumbnail_url: Optional[str] = None
