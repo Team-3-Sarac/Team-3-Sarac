@@ -249,11 +249,20 @@ async def save_unified_results(api_base_url, video_id, source_type, extracted_da
     if not extracted_data: return
 
     # 1. Update Video Risk & Metadata
-    safety = extracted_data.get("safety_report", {})
-    leagues_raw = extracted_data.get("detected_leagues", "Unknown")
-    leagues_list = [l.strip() for l in leagues_raw.split(",") if l.strip()]
-
     v_oid = ObjectId(video_id) if isinstance(video_id, str) else video_id
+
+    # use video league list for claims
+    video_doc = await db.videos.find_one({"_id": v_oid}, {"league": 1})
+    leagues_list = video_doc.get("league", []) if video_doc else []
+    # fall back to extracted llm leagues if video has no leagues
+    if not leagues_list:
+        leagues_raw = extracted_data.get("detected_leagues", "")
+        leagues_list = [l.strip() for l in leagues_raw.split(",") if l.strip() and l.strip().lower() != "unknown"]
+
+    if not leagues_list:
+        leagues_list = ["unknown"]
+
+    safety = extracted_data.get("safety_report", {})
 
     await db.videos.update_one(
         {"_id": v_oid},
