@@ -46,18 +46,8 @@ compose() {
 
 log "Stopping existing containers..."
 if ! compose down --remove-orphans --timeout 30; then
-    log "WARN: compose down failed; continuing (legacy containers may need manual removal)."
+    log "WARN: compose down failed; check for a stuck stack or name conflict."
 fi
-
-# Old compose used container_name: mongo|qdrant|fastapi (global names). If anything
-# still holds those names after `down`, remove it so this project can start. Dedicated
-# deploy hosts only; do not use this pattern if other stacks need those literal names.
-for legacy in mongo qdrant fastapi; do
-    if docker inspect "$legacy" >/dev/null 2>&1; then
-        log "Removing stale container blocking name: $legacy"
-        docker rm -f "$legacy" || true
-    fi
-done
 
 log "Rebuilding containers..."
 compose build --no-cache --pull
