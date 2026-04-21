@@ -22,6 +22,7 @@ services:
       - ./fastapi/.env
     environment:
       MONGO_HOST: mongo
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       mongo:
         condition: service_healthy

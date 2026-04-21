@@ -30,7 +30,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from routes.database.database import db
 
 # Clients
-qdrant = AsyncQdrantClient(url="http://localhost:6333", api_key=os.getenv("QDRANT_API_KEY"))
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+qdrant = AsyncQdrantClient(url=QDRANT_URL, api_key=os.getenv("QDRANT_API_KEY"))
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Progress & Token Tracking
