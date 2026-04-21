@@ -48,9 +48,10 @@ skipped_lock = asyncio.Lock()
 rate_limit_event = asyncio.Event()
 rate_limit_event.set()
 
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 qdrant = QdrantClient(
-    url="http://localhost:6333",
-    api_key=os.getenv("QDRANT_API_KEY")
+    url=QDRANT_URL,
+    api_key=os.getenv("QDRANT_API_KEY"),
 )
 QDRANT_COLLECTION = "claims_embeddings"
 

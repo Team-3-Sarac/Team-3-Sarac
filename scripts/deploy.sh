@@ -11,6 +11,8 @@ COMPOSE_FILE="$REPO_DIR/docker-compose.yml"
 ENV_FILE="$REPO_DIR/fastapi/.env"
 HEALTH_TIMEOUT=90
 HEALTH_INTERVAL=5
+# Stable project name so `down` / `up` always target the same stack (avoids orphan networks).
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-team-3-sarac}"
 
 log() { echo "[deploy] $(date '+%H:%M:%S') $*"; }
 
@@ -43,13 +45,25 @@ compose() {
 }
 
 log "Stopping existing containers..."
-compose down --timeout 30 || true
+if ! compose down --remove-orphans --timeout 30; then
+    log "WARN: compose down failed; continuing (legacy containers may need manual removal)."
+fi
+
+# Old compose used container_name: mongo|qdrant|fastapi (global names). If anything
+# still holds those names after `down`, remove it so this project can start. Dedicated
+# deploy hosts only; do not use this pattern if other stacks need those literal names.
+for legacy in mongo qdrant fastapi; do
+    if docker inspect "$legacy" >/dev/null 2>&1; then
+        log "Removing stale container blocking name: $legacy"
+        docker rm -f "$legacy" || true
+    fi
+done
 
 log "Rebuilding containers..."
 compose build --no-cache --pull
 
 log "Starting containers..."
-compose up -d
+compose up -d --remove-orphans
 
 log "Waiting for all containers to become ready..."
 SERVICES=$(compose ps --format '{{.Name}}')

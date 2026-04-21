@@ -14,7 +14,6 @@ services:
       
   fastapi:
     build: ./fastapi
-    container_name: fastapi
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -22,6 +21,7 @@ services:
       - ./fastapi/.env
     environment:
       MONGO_HOST: mongo
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       mongo:
         condition: service_healthy
@@ -40,7 +40,6 @@ services:
 
   mongo:
     image: mongo:8
-    container_name: mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -65,7 +64,6 @@ services:
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: qdrant
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
