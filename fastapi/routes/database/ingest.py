@@ -167,7 +167,7 @@ async def ingest_videos(videos: list[Video]):
         #added missing leagues and can now store multiple leagues per video
         title_lower = title.lower()
         doc["league"] = []
-        if "ucl" in title_lower or "champions league" in title_lower or "golazo" in channel.lower():
+        if "ucl" in title_lower or "champions league" in title_lower:
             doc["league"].append("Champions League")
         if "premier league" in title_lower:
             doc["league"].append("Premier League")
