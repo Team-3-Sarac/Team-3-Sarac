@@ -163,21 +163,24 @@ async def ingest_videos(videos: list[Video]):
         title = doc.get("title", "")
         channel = doc.get("channel_name", "")
 
-        # league rules 
+        # league rules
+        #added missing leagues and can now store multiple leagues per video
         title_lower = title.lower()
+        doc["league"] = []
         if "ucl" in title_lower or "champions league" in title_lower:
-            doc["league"] = ["Champions League"]
-        elif "premier league" in title_lower:
-            doc["league"] = ["Premier League"]
-        elif "laliga" in title_lower or "la liga" in title_lower:
-            doc["league"] = ["La Liga"]
-        elif "golazo" in channel.lower():
-            doc["league"] = ["Champions League"]
-        else:
-            doc["league"] = []
-            
+            doc["league"].append("Champions League")
+        if "premier league" in title_lower:
+            doc["league"].append("Premier League")
+        if "laliga" in title_lower or "la liga" in title_lower:
+            doc["league"].append("La Liga")
+        if "bundesliga" in title_lower or "bundesliga" in channel.lower():
+            doc["league"].append("Bundesliga")
+        if "serie a" in title_lower:
+            doc["league"].append("Serie A")
+        if "ligue 1" in title_lower or "ligue1" in title_lower:
+            doc["league"].append("Ligue 1")
+
         # team extraction
-     
         KNOWN_TEAMS = [
              # Premier League
             'Arsenal', 'Chelsea', 'Liverpool', 'Manchester City', 'Manchester United',
@@ -846,11 +849,24 @@ async def get_league_stats():
 
 
 @router.get("/dashboard/claims")
-async def get_dashboard_claims(limit: int = Query(default=10, ge=1, le=50)):
+async def get_dashboard_claims(
+    limit: int = Query(default=10, ge=1, le=50),
+    days_back: int = Query(default=7, ge=1, le=90)
+):
     """Get emerging claims for dashboard display."""
-    # Get recent claims with high mention counts
+    # Get recent claims with high mention counts ()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
     pipeline = [
-        {"$sort": {"created_at": -1, "mentions": -1}},
+        {"$match": {"created_at": {"$gte": cutoff}}},
+        {"$addFields": {
+            "score": {
+                "$add": [
+                    {"$multiply": ["$mentions", 2]},
+                    {"$cond": [{"$eq": ["$source_type", "transcript"]}, 1, 0]}  # transcript bonus
+                ]
+            }
+        }},
+        {"$sort": {"score": -1}},
         {"$limit": limit},
     ]
 
@@ -858,9 +874,12 @@ async def get_dashboard_claims(limit: int = Query(default=10, ge=1, le=50)):
     async for doc in db.claims.aggregate(pipeline):
         claims.append({
             "id": str(doc["_id"]),
+            "video_id": str(doc.get("video_id")),
             "claim_text": doc.get("claim_text", "")[:150],  # Truncate for display
             "sentiment": doc.get("sentiment"),
             "sentiment_pct": doc.get("sentiment_pct"),
+            "confidence_score": doc.get("confidence"),
+            "source": doc.get("source_type"),
             "mentions": doc.get("mentions", 0),
             "narrative_category": doc.get("narrative_category"),
             "created_at": doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else str(doc["created_at"]),
