@@ -22,11 +22,14 @@ from pipeline.trends_service import calculate_trends
 # Configuration Defaults
 DEFAULT_API_BASE_URL = "http://localhost:8000"
 CHANNEL_IDS = [
-    "UCET00YnetHT7tOpu12v8jxg",
-    "UCqZQlzSHbVJrwrn5XvzrzcA",
-    "UC6c1z7bA__85CIWZ_jpCK-Q",
-    "UC0YatYmg5JRYzXJPxIdRd8g",
-    "UC6UL29enLNe4mqwTfAyeNuw"
+    "UCET00YnetHT7tOpu12v8jxg", # @cbssportsgolazo
+    "UCqZQlzSHbVJrwrn5XvzrzcA", # @nbcsports
+    "UC6c1z7bA__85CIWZ_jpCK-Q", # @espnfc
+    "UC0YatYmg5JRYzXJPxIdRd8g", # @bundesliga
+    "UC6UL29enLNe4mqwTfAyeNuw", # @beinsportsusa
+    "UCBJeMCIeLQos7wacox4hmLQ", # @seriea
+    "UCNAf1k0yIjyGu3k9BwAg3lg", # @skysportspremierleague
+    "UCQsH5XtIc9hONE1BQjucM0g" # @ligue1
 ]
 
 class StageTimer:
