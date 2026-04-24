@@ -31,6 +31,7 @@ function ScoreBar({ score }: { score: number }) {
 export default function TopicRow({
   hot,
   topic,
+  description,
   mentions,
   change,
   changeDir,
@@ -39,6 +40,7 @@ export default function TopicRow({
 }: {
   hot?: boolean;
   topic: string;
+  description?: string | null;
   mentions: string;
   change: string;
   changeDir: "up" | "down" | "flat";
@@ -58,13 +60,22 @@ export default function TopicRow({
   return (
     <div className="grid grid-cols-12 gap-4 px-6 py-4 transition-colors hover:bg-[#161616] group">
       {/* Topic */}
-      <div className="col-span-5 flex items-center gap-3 min-w-0">
-        {hot ? (
-          <Flame className="h-3.5 w-3.5 shrink-0 text-orange-400 group-hover:animate-pulse" />
-        ) : (
-          <span className="h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="truncate text-[13px] font-medium text-white/85">{topic}</span>
+      <div className="col-span-5 flex items-start gap-3 min-w-0">
+        <div className="pt-0.5">
+          {hot ? (
+            <Flame className="h-3.5 w-3.5 shrink-0 text-orange-400 group-hover:animate-pulse" />
+          ) : (
+            <span className="block h-3.5 w-3.5 shrink-0" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium text-white/85">{topic}</div>
+          {description ? (
+            <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-neutral-500">
+              {description}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Trend Score */}
