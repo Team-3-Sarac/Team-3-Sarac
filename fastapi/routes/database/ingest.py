@@ -875,7 +875,7 @@ async def get_dashboard_claims(
         claims.append({
             "id": str(doc["_id"]),
             "video_id": str(doc.get("video_id")),
-            "claim_text": doc.get("claim_text", "")[:150],  # Truncate for display
+            "claim_text": doc.get("claim_text", ""), # removed character limit
             "sentiment": doc.get("sentiment"),
             "sentiment_pct": doc.get("sentiment_pct"),
             "confidence_score": doc.get("confidence"),

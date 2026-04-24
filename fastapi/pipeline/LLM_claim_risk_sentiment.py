@@ -93,7 +93,7 @@ def calculate_cosine_similarity(vec1, vec2):
         return 0.0
     return float(dot_product / (norm_a * norm_b))
 
-def init_qdrant_collection(force_reset=True):
+def init_qdrant_collection(force_reset=False):
     if force_reset:
         try:
             qdrant.delete_collection(collection_name=QDRANT_COLLECTION)

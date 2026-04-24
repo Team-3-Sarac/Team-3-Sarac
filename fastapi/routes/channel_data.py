@@ -42,11 +42,26 @@ async def fetch_channels_data(channel_ids):
             # 1. Check for existing record via imported db
             existing_channel = await db.channels.find_one({"channel_id": channel_id})
 
-            # 2. YouTube API Fetch
-            response = await asyncio.to_thread(
-                lambda: yt_client.channels().list(part="snippet,statistics", id=channel_id).execute()
-            )
-            if not response.get("items"): 
+            # 2. YouTube API Fetch with timeout + retry
+            # A fresh client is created on each attempt to avoid reusing broken SSL state
+            response = None
+            for attempt in range(1, 4):
+                try:
+                    fresh_client = get_youtube_client()
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda: fresh_client.channels().list(part="snippet,statistics", id=channel_id).execute()
+                        ),
+                        timeout=15.0
+                    )
+                    break
+                except (asyncio.TimeoutError, Exception) as e:
+                    print(f"Attempt {attempt}/3 failed for channel {channel_id}: {e}")
+                    if attempt == 3:
+                        return None
+                    await asyncio.sleep(2 ** attempt)
+
+            if not response or not response.get("items"):
                 return None
 
             item = response["items"][0]
