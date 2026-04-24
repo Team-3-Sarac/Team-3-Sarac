@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from "recharts
 import { getLeagueStats } from "../../api/backend";
 import { useEffect, useState } from "react";
 
-const BAR_COLORS = ["#38bdf8", "#f87171", "#34d399", "#a78bfa", "#fbbf24"];
+const BAR_COLORS = ["#38bdf8", "#f87171", "#34d399", "#f97316", "#a78bfa", "#fbbf24"];
 
 type LeagueData = {
   league: string;
@@ -14,6 +14,7 @@ type LeagueData = {
 function getLeagueShortName(league: string): string {
   const map: Record<string, string> = {
     "Premier League": "PL",
+    "Champions League": "CL",
     "La Liga":        "La Liga",
     "Bundesliga":     "BL",
     "Serie A":        "Serie A",
@@ -33,11 +34,13 @@ export default function BarChartComponent() {
         const res = await getLeagueStats();
         const leagues = res.leagues || [];
         setData(
-          leagues.map((l: LeagueData) => ({
-            label: getLeagueShortName(l.league),
-            value: l.count,
-            full:  l.league,
-          }))
+          leagues
+            .filter((l: LeagueData) => l.league && l.league !== "Unknown" && l.league !== "Unk")
+            .map((l: LeagueData) => ({
+              label: getLeagueShortName(l.league),
+              value: l.count,
+              full:  l.league,
+            }))
         );
       } catch (err) {
         console.error("[BarChart] Failed to fetch league stats:", err);

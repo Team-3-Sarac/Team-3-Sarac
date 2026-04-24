@@ -49,6 +49,7 @@ type Claim = {
   confidence_score?: number | null;
   mentions?: number;
   narrative_category?: string | null;
+  source?: string | null;
   created_at: string;
 };
 
@@ -176,13 +177,13 @@ function MiniBar({ value, tone }: { value: number; tone: "pos" | "neg" | "neu" |
   const colors = {
     pos:  "bg-emerald-400",
     neg:  "bg-red-400",
-    neu:  "bg-neutral-500",
+    neu:  "bg-amber-400",
     conf: "bg-sky-400",
     teal: "bg-teal-400",
   };
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1 w-20 rounded-full bg-white/8 overflow-hidden">
+      <div className="h-1 w-30 rounded-full bg-white/8 overflow-hidden">
         <div
           className={`h-full rounded-full ${colors[tone]}`}
           style={{ width: `${Math.min(Math.max(value, 0), 100)}%` }}
@@ -198,7 +199,6 @@ function MiniBar({ value, tone }: { value: number; tone: "pos" | "neg" | "neu" |
 function EnhancedClaimRow({ claim }: { claim: Claim }) {
   const sentimentPct = claim.sentiment_pct != null ? claim.sentiment_pct * 100 : null;
   const confidenceScore = claim.confidence_score ?? null;
-  const mentionsPct = Math.min((claim.mentions ?? 0) / 50 * 100, 100);
   const sentimentTone: "pos" | "neg" | "neu" =
     claim.sentiment === "positive" ? "pos" : claim.sentiment === "negative" ? "neg" : "neu";
 
@@ -210,31 +210,26 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
             {claim.claim_text}
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            <Badge tone={getSentimentBadgeTone(claim.sentiment)}>
-              {getSentimentLabel(claim.sentiment)}
-            </Badge>
-            <Badge tone={confidenceScore == null ? "neu" : confidenceScore >= 0.7 ? "pos" : confidenceScore >= 0.4 ? "neu" : "neg"}>
-              {confidenceScore == null ? "Unknown" : confidenceScore >= 0.7 ? "High Confidence" : confidenceScore >= 0.4 ? "Med Confidence" : "Low Confidence"}
-            </Badge>
+            {claim.source && (
+              <Badge tone={claim.source === "transcript" ? "teal" : "sky"}>
+                {claim.source === "transcript" ? "Transcript" : "Comment"}
+              </Badge>
+            )}
             {claim.mentions !== undefined && claim.mentions > 0 && (
-              <span className="text-[11px] text-neutral-500">
+              <Badge tone="neutral">
                 {claim.mentions} mention{claim.mentions !== 1 ? "s" : ""}
-              </span>
+              </Badge>
             )}
           </div>
         </div>
         <div className="shrink-0 flex flex-col gap-2 pt-0.5">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-6">
             <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Sentiment</span>
             <MiniBar value={sentimentPct ?? 0} tone={sentimentTone} />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-6">
             <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Confidence</span>
             <MiniBar value={confidenceScore != null ? confidenceScore * 100 : 0} tone="conf" />
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold w-16 text-right">Mentions</span>
-            <MiniBar value={mentionsPct} tone="teal" />
           </div>
         </div>
       </div>
@@ -291,9 +286,9 @@ export default function TrendsPage() {
   useEffect(() => {
     async function fetchData() {
       const [trendsRes, narrativesRes, claimsRes] = await Promise.allSettled([
-        getTrends(),
+        getTrends({limit: 30}),
         getNarratives(),
-        getDashboardClaims(8),
+        getDashboardClaims(20),
       ]);
 
       if (trendsRes.status === "fulfilled") {
@@ -371,7 +366,7 @@ export default function TrendsPage() {
           <Card>
             <CardHeader
               title="Content Volume by League"
-              subtitle="Videos analyzed per league this month"
+              subtitle="Videos analyzed per league"
             />
             <div className="px-6 pb-6 pt-4">
               <BarChart />
@@ -381,13 +376,27 @@ export default function TrendsPage() {
           <Card>
             <CardHeader
               title="Topic Frequency"
-              subtitle="Most discussed topics over the last 6 weeks"
-              legendItems={[
-                { color: "bg-emerald-400", label: "Transfers" },
-                { color: "bg-red-400",     label: "Injuries" },
-                { color: "bg-sky-400",     label: "Tactics" },
-                { color: "bg-amber-400",   label: "Controversy" },
-              ]}
+              subtitle="Most discussed topics across all videos"
+              right={
+                <div className="flex items-center gap-4 text-[11px] text-neutral-500 mt-6">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    Transfers
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                    Injuries
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                    Tactics
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                    Controversy
+                  </span>
+                </div>
+              }
             />
             <div className="px-6 pb-6 pt-4">
               <LineChart />
@@ -400,13 +409,21 @@ export default function TrendsPage() {
           <Card>
             <CardHeader
               title="Emerging Claims"
-              subtitle="Trending claims with sentiment, confidence & mention metrics"
+              subtitle="Trending claims with sentiment, confidence & mention metrics. Extracted from comments and transcripts."
             />
             <div className="flex items-center justify-between border-b border-white/6 px-6 py-2.5">
               <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Claim</span>
               <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Metrics</span>
             </div>
-            <div className="divide-y divide-white/4">
+            <div
+              className="divide-y divide-white/4 overflow-y-scroll"
+              style={{
+                maxHeight: "calc(5 * 84px)",
+                minHeight: "calc(5 * 84px)",
+                scrollbarWidth: "thin",
+                scrollbarColor: "rgba(255,255,255,0.20) rgba(255,255,255,0.04)",
+              }}
+            >
               {loading ? (
                 <ClaimSkeleton />
               ) : claimsError ? (
@@ -478,7 +495,15 @@ export default function TrendsPage() {
               <div className="col-span-2 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">League</div>
             </div>
 
-            <div className="divide-y divide-white/4">
+            <div
+              className="overflow-y-scroll"
+              style={{
+                minHeight: "calc(5 * 57px)",
+                maxHeight: "calc(5 * 57px)",
+                scrollbarWidth: "thin",
+                scrollbarColor: "rgba(255,255,255,0.20) rgba(255,255,255,0.04)",
+              }}
+            >
               {loading ? (
                 <TableSkeleton />
               ) : tableError ? (

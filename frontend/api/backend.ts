@@ -78,10 +78,10 @@ export async function getTranscripts(videoId: string) {
 
 /* ---------------- trends ---------------- */
 
-export async function getTrends(time_window?: string) {
+export async function getTrends(params?: { time_window?: string; limit?: number }) {
   const searchParams = new URLSearchParams();
-  if (time_window) searchParams.set("time_window", time_window);
-
+  if (params?.time_window) searchParams.set("time_window", params.time_window);
+  if (params?.limit) searchParams.set("limit", params.limit.toString());
   return apiFetch(`${API_BASE}/trends?${searchParams.toString()}`);
 }
 

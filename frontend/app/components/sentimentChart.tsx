@@ -26,77 +26,95 @@ export default function SentimentChart({ data }: { data: SentimentData[] }) {
 
   return (
     <div className="h-full w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
-          <defs>
-            <linearGradient id="colorPositive" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
-            </linearGradient>
-            <linearGradient id="colorNegative" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-            </linearGradient>
-          </defs>
+      <style>{`
+        .sentiment-scroll::-webkit-scrollbar { height: 4px; }
+        .sentiment-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 9999px; width: 100%; }
+        .sentiment-scroll::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,0.10);
+          border-radius: 9999px;
+        }
+        .sentiment-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(255,255,255,0.20);
+        }
+      `}</style>
+      <div
+        className="sentiment-scroll h-full overflow-x-scroll overflow-y-hidden pb-2"
+        style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.20) rgba(255,255,255,0.04)" }}
+      >
+        <div style={{ minWidth: Math.max(data.length * 80, 765) }} className="h-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorPositive" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#34d399" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="colorNegative" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
 
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke="rgba(255,255,255,0.04)"
-            vertical={false}
-          />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="rgba(255,255,255,0.04)"
+                vertical={false}
+              />
 
-          <XAxis
-            dataKey="week"
-            tick={{ fill: "#525252", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            dy={8}
-          />
-          <YAxis
-            tick={{ fill: "#525252", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            domain={[0, 100]}
-            tickFormatter={(v) => `${v}%`}
-            ticks={[0, 25, 50, 75, 100]}
-          />
+              <XAxis
+                dataKey="week"
+                tick={{ fill: "#525252", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                dy={8}
+              />
+              <YAxis
+                tick={{ fill: "#525252", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                domain={[0, 100]}
+                tickFormatter={(v) => `${v}%`}
+                ticks={[0, 25, 50, 75, 100]}
+              />
 
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "#0f0f0f",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-            }}
-            labelStyle={{ color: "#737373", marginBottom: 4 }}
-            formatter={(value, name) => [
-              `${Number(value).toFixed(1)}%`,
-              name === "positive" ? "Positive" : "Negative",
-            ]}
-            cursor={{ stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }}
-          />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#0f0f0f",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                }}
+                labelStyle={{ color: "#737373", marginBottom: 4 }}
+                formatter={(value, name) => [
+                  `${Number(value).toFixed(1)}%`,
+                  name === "positive" ? "Positive" : "Negative",
+                ]}
+                cursor={{ stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }}
+              />
 
-          <Area
-            type="monotone"
-            dataKey="positive"
-            stroke="#38bdf8"
-            strokeWidth={2}
-            fillOpacity={1}
-            fill="url(#colorPositive)"
-            name="positive"
-          />
-          <Area
-            type="monotone"
-            dataKey="negative"
-            stroke="#ef4444"
-            strokeWidth={2}
-            fillOpacity={1}
-            fill="url(#colorNegative)"
-            name="negative"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+              <Area
+                type="monotone"
+                dataKey="positive"
+                stroke="#34d399"
+                strokeWidth={2}
+                fillOpacity={1}
+                fill="url(#colorPositive)"
+                name="positive"
+              />
+              <Area
+                type="monotone"
+                dataKey="negative"
+                stroke="#ef4444"
+                strokeWidth={2}
+                fillOpacity={1}
+                fill="url(#colorNegative)"
+                name="negative"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
   );
 }

@@ -62,7 +62,7 @@ export default function VideoRow({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="neutral">{league}</Badge>
+          {league && <Badge tone="neutral">{league}</Badge>}
           <Badge tone={sentimentTone}>{sentiment}</Badge>
         </div>
         <div className="mt-2 line-clamp-1 text-[13px] font-semibold leading-snug text-white group-hover:text-teal-300 transition-colors">
