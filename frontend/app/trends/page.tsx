@@ -29,6 +29,7 @@ type Trend = {
 type Narrative = {
   id: string;
   title: string;
+  description?: string | null;
   league: string | null;
   claims_ids: string[];
   created_at: string;
@@ -107,8 +108,8 @@ function matchesCategory(cat: string | null, filter: Category): boolean {
 function sortTrends(trends: Trend[], dir: SortDir): Trend[] {
   return [...trends].sort((a, b) =>
     dir === "desc"
-      ? b.mention_count - a.mention_count
-      : a.mention_count - b.mention_count
+      ? b.score - a.score
+      : a.score - b.score
   );
 }
 
@@ -237,7 +238,7 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
   );
 }
 
-function MentionsToggle({ dir, onChange }: { dir: SortDir; onChange: (d: SortDir) => void }) {
+function ScoreToggle({ dir, onChange }: { dir: SortDir; onChange: (d: SortDir) => void }) {
   return (
     <div className="flex items-center gap-1 rounded-md bg-white/5 ring-1 ring-inset ring-white/8 p-0.5">
       <button
@@ -250,7 +251,7 @@ function MentionsToggle({ dir, onChange }: { dir: SortDir; onChange: (d: SortDir
         ].join(" ")}
       >
         <ArrowUpDown className="h-2.5 w-2.5" />
-        Most
+        High
       </button>
       <button
         onClick={() => onChange("asc")}
@@ -262,7 +263,7 @@ function MentionsToggle({ dir, onChange }: { dir: SortDir; onChange: (d: SortDir
         ].join(" ")}
       >
         <ArrowUpDown className="h-2.5 w-2.5" />
-        Least
+        Low
       </button>
     </div>
   );
@@ -480,9 +481,9 @@ export default function TrendsPage() {
 
               <div className="pb-3 pl-4 shrink-0 flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold hidden sm:block">
-                  Mentions
+                  Trend Score
                 </span>
-                <MentionsToggle dir={sortDir} onChange={setSortDir} />
+                <ScoreToggle dir={sortDir} onChange={setSortDir} />
               </div>
             </div>
 
@@ -511,22 +512,22 @@ export default function TrendsPage() {
               ) : filteredTrends.length === 0 ? (
                 <EmptyState message={activeCategory === "All" ? "No trends available" : `No ${activeCategory} trends found`} />
               ) : (
-                filteredTrends.map((trend) => (
-                  <TopicRow
-                    key={trend.id}
-                    hot={trend.trending_direction === "up" && trend.score >= 0.75}
-                    topic={
-                      narratives.find((n) => n.id === trend.narrative_id)?.title ||
-                      trend.league ||
-                      "General Topic"
-                    }
-                    mentions={trend.mention_count.toString()}
-                    change={formatChange(trend.trending_direction, trend.mention_count)}
-                    changeDir={getChangeDir(trend.trending_direction)}
-                    leagues={getTopicLeague(trend)}
-                    score={trend.score}
-                  />
-                ))
+                filteredTrends.map((trend) => {
+                  const narrative = narratives.find((n) => n.id === trend.narrative_id);
+                  return (
+                    <TopicRow
+                      key={trend.id}
+                      hot={trend.trending_direction === "up" && trend.score >= 0.75}
+                      topic={narrative?.title || "General Topic"}
+                      description={narrative?.description || null}
+                      mentions={trend.mention_count.toString()}
+                      change={formatChange(trend.trending_direction, trend.mention_count)}
+                      changeDir={getChangeDir(trend.trending_direction)}
+                      leagues={getTopicLeague(trend)}
+                      score={trend.score}
+                    />
+                  );
+                })
               )}
             </div>
 
