@@ -594,7 +594,7 @@ def _doc_to_video_out(doc: dict) -> VideoOut:
         comment_count=doc.get("comment_count", 0),
         duration_seconds=doc.get("duration_seconds", 0),
         summary=doc.get("summary"),
-        sentiment_pct=doc.get("sentiment_pct", 0.5),
+        sentiment_pct=doc.get("sentiment_pct") or 0.5,
         risk_score=doc.get("risk_score", 0),
         risk_level=doc.get("risk_level", "low"),
         risk_breakdown=doc.get("risk_breakdown"),

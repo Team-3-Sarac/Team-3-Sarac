@@ -8,14 +8,14 @@ function ScoreBar({ score }: { score: number }) {
   // Colour matches site convention: teal = high, amber = mid, red = low
   const barColor =
     pct >= 65
-      ? "bg-teal-400"
+      ? "bg-emerald-400"
       : pct >= 40
       ? "bg-amber-400"
       : "bg-red-400";
 
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1 w-20 rounded-full bg-white/8 overflow-hidden">
+      <div className="h-1 w-30 rounded-full bg-white/8 overflow-hidden">
         <div
           className={`h-full rounded-full ${barColor}`}
           style={{ width: `${pct}%` }}

@@ -77,11 +77,11 @@ const FEATURES = [
   {
     icon: <BarChart2 className="h-5 w-5" />,
     label: "Cross-League Benchmarking",
-    desc: "Compare video volume, sentiment, and engagement across the Premier League, La Liga, Bundesliga, Serie A, and Ligue 1.",
+    desc: "Compare video volume, sentiment, and engagement across the Premier League, Champions League, La Liga, Bundesliga, Serie A, and Ligue 1.",
   },
 ];
 
-const LEAGUES = ["Premier League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
+const LEAGUES = ["Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
 
 /* Page */
 
