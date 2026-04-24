@@ -74,7 +74,7 @@ async def get_trends(
     #     query["time_window"] = time_window
 
     # docs = await db.trends.find(query).to_list(None)
-    docs = await db.trends.find({}).limit(limit).to_list(limit)
+    docs = await db.trends.find({}).sort("current_score", -1).limit(limit).to_list(limit)
     trends = [_doc_to_trend_out(doc) for doc in docs]
     return {"trends": trends, "count": len(trends)}
 
