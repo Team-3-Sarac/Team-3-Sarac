@@ -40,7 +40,6 @@ type ChannelRowData = {
   sentimentDir: "up" | "down" | "flat";
   latestTitle: string;
   latestViews: string;
-  active: boolean;
   riskScore?: number | null;
   riskLevel?: "low" | "medium" | "high" | "critical" | null;
 };
@@ -157,7 +156,7 @@ export default function ChannelsPage() {
 
   const avgRiskScore = rows.length > 0 && rows.some(r => r.riskScore !== null)
     ? Math.round(rows.reduce((sum, r) => sum + (r.riskScore || 0), 0) / rows.filter(r => r.riskScore !== null).length)
-    : 0;
+    : null;
 
   const channelsWithRisk = rows.filter(r => r.riskScore !== null).length;
 
@@ -186,7 +185,7 @@ export default function ChannelsPage() {
         const channelList: Channel[] = channelsRes.value.channels || [];
         setChannels(channelList);
 
-        const riskMap = new Map<string, { riskScore: number; riskLevel: string }>();
+        const riskMap = new Map<string, { riskScore: number | null; riskLevel: string | null }>();
         if (riskRes.status === "fulfilled") {
           (riskRes.value.channels || []).forEach((c: any) => {
             riskMap.set(c.channel_id, {
@@ -202,9 +201,9 @@ export default function ChannelsPage() {
           const channelVideos =
             videosRes.value.videos?.filter((v: any) => v.channel_id === c.channel_id) || [];
           const latestVideo = channelVideos[0];
-          const videosWithSentiment = channelVideos.filter((v: any) => v.sentiment_score != null);
+          const videosWithSentiment = channelVideos.filter((v: any) => v.sentiment_pct !== null && v.sentiment_pct !== undefined);
           const avgSentiment = videosWithSentiment.length > 0
-            ? videosWithSentiment.reduce((sum: number, v: any) => sum + v.sentiment_score, 0) / videosWithSentiment.length
+            ? videosWithSentiment.reduce((sum: number, v: any) => sum + v.sentiment_pct, 0) / videosWithSentiment.length
             : null;
           const riskData = riskMap.get(c.channel_id);
 
@@ -220,7 +219,6 @@ export default function ChannelsPage() {
             sentimentDir: avgSentiment == null ? "flat" : avgSentiment > 0.6 ? "up" : avgSentiment < 0.4 ? "down" : "flat",
             latestTitle: latestVideo?.title || "No recent videos",
             latestViews: latestVideo ? formatViews(latestVideo.view_count) : "0 views",
-            active: true,
             riskScore: riskData?.riskScore ?? null,
             riskLevel: (riskData?.riskLevel ?? null) as ChannelRowData["riskLevel"],
           };
@@ -243,12 +241,6 @@ export default function ChannelsPage() {
     fetchData();
   }, []);
 
-  const toggleActive = (id: string) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r))
-    );
-  };
-
   const handleRiskClick = async (channelId: string) => {
     setRiskLoading(true);
     try {
@@ -262,9 +254,6 @@ export default function ChannelsPage() {
       setRiskLoading(false);
     }
   };
-
-  const activeCount = rows.filter((r) => r.active).length;
-  const pausedCount = rows.filter((r) => !r.active).length;
 
   return (
     <div className="relative min-h-screen w-full overflow-x-hidden bg-[#080808] text-white">
@@ -314,7 +303,7 @@ export default function ChannelsPage() {
           <KpiCard
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
             title="Avg. Risk Score"
-            value={loading || channelsError ? "—" : `${avgRiskScore}`}
+            value={loading || channelsError || avgRiskScore === null ? "—" : `${avgRiskScore}`}
             sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${channelsWithRisk}/${rows.length} channels analyzed`}
             loading={loading}
           />
@@ -337,7 +326,7 @@ export default function ChannelsPage() {
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
             value={channelsError ? "—" : formatNumber(animatedChannels)}
-            sub={channelsError ? "Failed to load" : loading ? "Loading…" : `${activeCount} active, ${pausedCount} paused`}
+            sub={channelsError ? "Failed to load" : loading ? "Loading…" : "Monitored creator accounts"}
             loading={loading}
           />
         </div>
@@ -356,8 +345,7 @@ export default function ChannelsPage() {
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Videos</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Sentiment</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Risk</div>
-              <div className="col-span-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Latest Video</div>
-              <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Active</div>
+              <div className="col-span-3 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Latest Video</div>
             </div>
 
             <div className="divide-y divide-white/4">
@@ -372,7 +360,6 @@ export default function ChannelsPage() {
                   <ChannelRow
                     key={r.id}
                     row={r}
-                    onToggle={() => toggleActive(r.id)}
                     onRiskClick={() => handleRiskClick(r.id)}
                   />
                 ))

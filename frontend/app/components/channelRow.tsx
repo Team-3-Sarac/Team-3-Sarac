@@ -13,7 +13,6 @@ type ChannelRowData = {
   sentimentDir: "up" | "down" | "flat";
   latestTitle: string;
   latestViews: string;
-  active: boolean;
   riskScore?: number | null;
   riskLevel?: "low" | "medium" | "high" | "critical" | null;
 };
@@ -29,6 +28,10 @@ function getRiskLabel(score: number): string {
   if (score >= 51) return "High";
   if (score >= 26) return "Medium";
   return "Low";
+}
+
+function hasRiskData(score: number | null | undefined, level: string | null | undefined): boolean {
+  return score !== null && score !== undefined && level !== null && level !== undefined;
 }
 
 function getRiskBadgeTone(level: string): "pos" | "neu" | "neg" {
@@ -76,11 +79,9 @@ function getRiskIcon(level: string) {
 
 export default function ChannelRow({
   row,
-  onToggle,
   onRiskClick,
 }: {
   row: ChannelRowData;
-  onToggle: () => void;
   onRiskClick?: () => void;
 }) {
   const sentimentTone =
@@ -101,6 +102,7 @@ export default function ChannelRow({
       ? "text-red-400"
       : "text-neutral-500";
 
+  const riskAvailable = hasRiskData(row.riskScore, row.riskLevel);
   const riskLevel = row.riskLevel || "low";
   const riskScore = row.riskScore ?? 0;
   const RiskIcon = getRiskIcon(riskLevel);
@@ -141,50 +143,27 @@ export default function ChannelRow({
 
       {/* Risk */}
       <div className="col-span-1 flex items-center justify-end gap-2">
-        <button
-          onClick={onRiskClick}
-          className="inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity"
-          title={`Risk Score: ${riskScore} - ${getRiskLabel(riskScore)}`}
-        >
-          <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums ${riskColor}`}>
-            <RiskIcon className="h-3.5 w-3.5 shrink-0" />
-            {Math.round(riskScore)}
-          </span>
-          <Badge tone={riskBadgeTone}>{getRiskLabel(riskScore)}</Badge>
-        </button>
+        {riskAvailable ? (
+          <button
+            onClick={onRiskClick}
+            className="inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+            title={`Risk Score: ${riskScore} - ${getRiskLabel(riskScore)}`}
+          >
+            <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums ${riskColor}`}>
+              <RiskIcon className="h-3.5 w-3.5 shrink-0" />
+              {Math.round(riskScore)}
+            </span>
+            <Badge tone={riskBadgeTone}>{getRiskLabel(riskScore)}</Badge>
+          </button>
+        ) : (
+          <span className="text-[12px] text-neutral-500">—</span>
+        )}
       </div>
 
       {/* Latest video */}
-      <div className="col-span-2 min-w-0">
+      <div className="col-span-3 min-w-0">
         <div className="truncate text-[12px] text-neutral-400">{row.latestTitle}</div>
         <div className="mt-0.5 text-[11px] text-neutral-600">{row.latestViews}</div>
-      </div>
-
-      {/* Active toggle */}
-      <div className="col-span-1 flex items-center justify-end">
-        <button
-          onClick={onToggle}
-          className="group flex items-center gap-1.5"
-          title={row.active ? "Deactivate" : "Activate"}
-        >
-          <span
-            className={[
-              "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors duration-200",
-              row.active
-                ? "border-teal-500/40 bg-teal-500/20"
-                : "border-white/8 bg-white/4",
-            ].join(" ")}
-          >
-            <span
-              className={[
-                "absolute top-0.5 h-4 w-4 rounded-full transition-transform duration-200",
-                row.active
-                  ? "translate-x-4 bg-teal-400 shadow-[0_0_6px_rgba(45,212,191,0.6)]"
-                  : "translate-x-0.5 bg-neutral-600",
-              ].join(" ")}
-            />
-          </span>
-        </button>
       </div>
     </div>
   );

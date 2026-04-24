@@ -100,6 +100,7 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
 export default function RiskModal({ isOpen, onClose, channelData }: RiskModalProps) {
   if (!isOpen || !channelData) return null;
 
+  const riskAvailable = channelData.avg_risk_score !== null && channelData.avg_risk_score !== undefined;
   const riskScore = channelData.avg_risk_score ?? 0;
   const riskLevel = channelData.risk_level || "low";
 
@@ -130,20 +131,20 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
         {/* Content */}
         <div className="p-6 space-y-6">
           {/* Overall Risk Score */}
-          <div className={`p-6 rounded-xl border ${getRiskBgColor(riskLevel)}`}>
+          <div className={`p-6 rounded-xl border ${riskAvailable ? getRiskBgColor(riskLevel) : "bg-neutral-500/10 border-white/10"}`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-neutral-400">Overall Risk Level</p>
-                <p className={`text-3xl font-bold mt-1 ${getRiskColor(riskLevel)}`}>
-                  {getRiskLabel(riskScore)}
+                <p className={`text-3xl font-bold mt-1 ${riskAvailable ? getRiskColor(riskLevel) : "text-neutral-400"}`}>
+                  {riskAvailable ? getRiskLabel(riskScore) : "Unavailable"}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-medium text-neutral-400">Risk Score</p>
-                <p className={`text-4xl font-bold mt-1 ${getRiskColor(riskLevel)}`}>
-                  {Math.round(riskScore)}
+                <p className={`text-4xl font-bold mt-1 ${riskAvailable ? getRiskColor(riskLevel) : "text-neutral-400"}`}>
+                  {riskAvailable ? Math.round(riskScore) : "—"}
                 </p>
-                <p className="text-xs text-neutral-500">out of 100</p>
+                <p className="text-xs text-neutral-500">{riskAvailable ? "out of 100" : "Awaiting analysis"}</p>
               </div>
             </div>
           </div>
@@ -169,7 +170,7 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
           </div>
 
           {/* Risk Breakdown */}
-          {channelData.risk_breakdown && Object.keys(channelData.risk_breakdown).length > 0 && (
+          {riskAvailable && channelData.risk_breakdown && Object.keys(channelData.risk_breakdown).length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-white mb-4">Risk Category Breakdown</h3>
               <div className="space-y-3">
@@ -241,8 +242,9 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
           <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
             <p className="text-xs text-blue-300">
               <strong>Note:</strong> Risk scores are calculated using AI analysis of video transcripts.
-              Scores are aggregated at the channel level from all analyzed videos.
-              Categories with higher scores indicate more frequent or severe risk indicators.
+              {riskAvailable
+                ? " Scores are aggregated at the channel level from all analyzed videos. Categories with higher scores indicate more frequent or severe risk indicators."
+                : " This creator does not have transcript-backed risk analysis yet, so no score is shown."}
             </p>
           </div>
         </div>
