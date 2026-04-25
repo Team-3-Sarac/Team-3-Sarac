@@ -866,7 +866,7 @@ async def get_dashboard_claims(
                 ]
             }
         }},
-        {"$sort": {"score": -1}},
+        {"$sort": {"score": -1, "created_at": -1}},
         {"$limit": limit},
     ]
 
