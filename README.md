@@ -21,7 +21,7 @@ YouTube is the primary source of soccer highlights and analysis, but the volume 
 | Backend         | FastAPI                      |
 | Database        | MongoDB                      |
 | Vector DB       | Qdrant                       |
-| LLM             | OpenAI GPT-4o-mini           |
+| LLM             | OpenAI GPT-4.1-mini           |
 | Data Collection | YouTube Data API v3          |
 | Infrastructure  | Hetzner (Docker Compose)     |
 | CI/CD           | GitHub Actions               |
