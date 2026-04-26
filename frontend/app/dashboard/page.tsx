@@ -12,7 +12,7 @@ import SentimentChart from "../components/sentimentChart";
 import {
   getDashboardKPIs,
   getLeagueStats,
-  getVideos,
+  getVideosByLeague,
   getEvents,
   getSentimentHistory,
   getTrends,
@@ -176,13 +176,13 @@ function LeagueSkeleton({ rows = 5 }: { rows?: number }) {
    PAGE
 ================================================================ */
 
-const ALL_LEAGUES = ["All", "Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
+const ALL_LEAGUES = ["Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"];
 const FETCH_TIMEOUT_MS = 15000;
 
 export default function DashboardPage() {
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [leagues, setLeagues] = useState<League[]>([]);
-  const [videos, setVideos] = useState<VideoData[]>([]);
+  const [videosByLeague, setVideosByLeague] = useState<Record<string, VideoData[]>>({});
   const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
   const [topNarratives, setTopNarratives] = useState<{ title: string; score: number }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -191,7 +191,7 @@ export default function DashboardPage() {
   const [videosError, setVideosError] = useState(false);
   const [narrativesError, setNarrativesError] = useState(false);
   const [sentimentError, setSentimentError] = useState(false);
-  const [activeLeague, setActiveLeague] = useState("All");
+  const [activeLeague, setActiveLeague] = useState("Premier League");
 
   const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
   const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
@@ -212,7 +212,7 @@ export default function DashboardPage() {
         await Promise.allSettled([
           withTimeout(getDashboardKPIs(),           "getDashboardKPIs"),
           withTimeout(getLeagueStats(),             "getLeagueStats"),
-          withTimeout(getVideos({ limit: 30 }),     "getVideos"),
+          withTimeout(getVideosByLeague(10),          "getVideosByLeague"),
           withTimeout(getSentimentHistory(),        "getSentimentHistory"),
           withTimeout(getTrends({ limit: 5 }),     "getTrends"),
           withTimeout(getNarratives(),              "getNarratives"),
@@ -249,7 +249,7 @@ export default function DashboardPage() {
       }
 
       if (videoRes.status === "fulfilled") {
-        setVideos(videoRes.value.videos || []);
+        setVideosByLeague(videoRes.value.videos_by_league || {});
       } else {
         console.error("[Dashboard] Videos failed:", videoRes.reason);
         setVideosError(true);
@@ -293,10 +293,7 @@ export default function DashboardPage() {
   }, []);
 
   const sentimentTone = kpis ? getSentimentTone(kpis.avg_sentiment) : "neu";
-  const filteredVideos =
-    activeLeague === "All"
-      ? videos
-      : videos.filter((v) => v.league === activeLeague);
+  const filteredVideos = videosByLeague[activeLeague] || [];
 
   /* ── KPI sub-text helpers (guards against null/error/loading) ── */
   function kpiSub(errorFlag: boolean, loadedValue: string): string {
@@ -464,8 +461,8 @@ export default function DashboardPage() {
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-2 flex flex-col min-h-125">
             <CardHeader
-              title="Trending Match Content"
-              subtitle="Most watched soccer content from tracked channels"
+              title="Trending Videos by League"
+              subtitle="Most viewed videos from tracked channels, filtered by league"
             />
             {/* League filter tabs */}
             <div className="flex gap-1 overflow-x-auto border-b border-white/6 px-6 pb-0 pt-3 scrollbar-none">
@@ -534,8 +531,7 @@ export default function DashboardPage() {
             {!loading && !videosError && (
               <div className="border-t border-white/4 px-6 py-3">
                 <span className="text-[11px] text-neutral-600">
-                  Showing {filteredVideos.length} of {videos.length} videos
-                  {activeLeague !== "All" && ` · filtered by ${activeLeague}`}
+                  Showing {filteredVideos.length} of {filteredVideos.length} {activeLeague} videos
                 </span>
               </div>
             )}
@@ -544,7 +540,7 @@ export default function DashboardPage() {
           <Card className="self-start">
             <CardHeader
               title="League Overview"
-              subtitle="Content volume & status by league"
+              subtitle="Video breakdown across all tracked leagues"
             />
             <div className="divide-y divide-white/4">
               {loading ? (
