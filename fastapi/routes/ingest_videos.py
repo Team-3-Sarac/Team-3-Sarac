@@ -52,6 +52,7 @@ CHANNEL_IDS = [
     "UC2NB_acBZHQIeqxTaWj2dVQ",  # Maqwell - International and overall commentary
     "UCTv-XvfzLX3i4IGWAm4sbmA",  # LaLiga - La Liga official channel
     "UCBJeMCIeLQos7wacox4hmLQ",  # Serie A - Serie A official channel
+    "UCQsH5XtIc9hONE1BQjucM0g"   # Ligue 1 McDonald's - Ligue 1 official channel
 ]
 
 def get_youtube_client():
