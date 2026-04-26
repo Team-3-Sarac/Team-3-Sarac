@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import Badge from "../components/badge";
 import { Flame, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
@@ -56,6 +57,15 @@ export default function TopicRow({
   leagues: string[];
   score?: number;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const descRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = descRef.current;
+    if (el) setIsClamped(el.scrollHeight > el.clientHeight);
+  }, [description]);
+
   const changeColor =
     changeDir === "up"
       ? "text-emerald-400"
@@ -70,19 +80,27 @@ export default function TopicRow({
     <div className="grid grid-cols-12 gap-4 px-6 py-4 transition-colors hover:bg-[#161616] group">
       {/* Topic */}
       <div className="col-span-6 flex items-start gap-3 min-w-0">
-        <div className="pt-0.5">
-          {hot ? (
+        {hot && (
+          <div className="pt-0.5">
             <Flame className="h-3.5 w-3.5 shrink-0 text-orange-400 group-hover:animate-pulse" />
-          ) : (
-            <span className="block h-3.5 w-3.5 shrink-0" />
-          )}
-        </div>
+          </div>
+        )}
         <div className="min-w-0">
           <div className="truncate text-[13px] font-medium text-white/85">{topic}</div>
           {description ? (
-            <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-neutral-500">
-              {description}
-            </div>
+            <>
+              <div ref={descRef} className={`mt-1 text-[11px] leading-relaxed text-neutral-500 ${expanded ? "" : "line-clamp-2"}`}>
+                {description}
+              </div>
+              {(isClamped || expanded) && (
+                <button
+                  onClick={() => setExpanded((v) => !v)}
+                  className="text-[11px] text-neutral-500 hover:text-neutral-400 transition-colors duration-150 -mt-1"
+                >
+                  {expanded ? "See less" : "See more"}
+                </button>
+              )}
+            </>
           ) : null}
         </div>
       </div>
