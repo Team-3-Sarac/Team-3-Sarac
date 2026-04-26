@@ -65,9 +65,6 @@ export default function VideoRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           {sentiment !== "N/A" && <Badge tone={sentimentTone}>{sentiment}</Badge>}
-          {["Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"].includes(league) && (
-            <Badge tone="neutral">{league}</Badge>
-          )}
           {teams.slice(0, 2).map((team) => (
             <Badge key={team} tone="neutral">{team}</Badge>
           ))}

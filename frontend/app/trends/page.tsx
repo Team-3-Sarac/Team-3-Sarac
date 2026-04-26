@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Skeleton from "../components/skeleton";
 import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
@@ -10,7 +10,7 @@ import TopicRow from "../components/topicRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
 import { getTrends, getNarratives, getDashboardClaims } from "../../api/backend";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, Youtube } from "lucide-react";
 
 /* ---------------- Types ---------------- */
 
@@ -52,6 +52,7 @@ type Claim = {
   mentions?: number;
   narrative_category?: string | null;
   source?: string | null;
+  youtube_video_id?: string | null;
   created_at: string;
 };
 
@@ -206,6 +207,15 @@ function MiniBar({ value, tone }: { value: number; tone: "pos" | "neg" | "neu" |
 }
 
 function EnhancedClaimRow({ claim }: { claim: Claim }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const claimRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = claimRef.current;
+    if (el) setIsClamped(el.scrollHeight > el.clientHeight);
+  }, [claim.claim_text]);
+
   const sentimentPct = claim.sentiment_pct != null ? claim.sentiment_pct * 100 : null;
   const confidenceScore = claim.confidence_score ?? null;
   const sentimentTone: "pos" | "neg" | "neu" =
@@ -215,12 +225,31 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
     <div className="px-6 py-4 transition-colors hover:bg-[#161616]">
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-medium text-white/85 line-clamp-2 leading-relaxed">
+          <p ref={claimRef} className={`text-[13px] font-medium text-white/85 leading-relaxed ${expanded ? "" : "line-clamp-2"}`}>
             {claim.claim_text}
           </p>
+          {(isClamped || expanded) && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="text-[11px] text-neutral-500 hover:text-neutral-400 transition-colors duration-150 mt-1"
+            >
+              {expanded ? "see less" : "see more"}
+            </button>
+          )}
           <div className="flex flex-wrap items-center gap-2 mt-2">
+            {claim.youtube_video_id && (
+              <a
+                href={`https://www.youtube.com/watch?v=${claim.youtube_video_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md bg-white/8 px-2.5 py-1 text-[11px] font-medium text-neutral-400 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:bg-teal-500/10 hover:text-teal-300 hover:ring-teal-500/20 active:scale-95"
+              >
+                <Youtube className="h-3 w-3" />
+                Watch on YouTube
+              </a>
+            )}
             {claim.source && (
-              <Badge tone={claim.source === "transcript" ? "teal" : "sky"}>
+              <Badge tone="neutral">
                 {claim.source === "transcript" ? "Transcript" : "Comment"}
               </Badge>
             )}
@@ -418,7 +447,7 @@ export default function TrendsPage() {
           <Card>
             <CardHeader
               title="Emerging Claims"
-              subtitle="Trending claims with sentiment, confidence & mention metrics. Extracted from comments and transcripts."
+              subtitle="Insights extracted from comments and transcripts, scored by sentiment, confidence, and mention count"
             />
             <div className="flex items-center justify-between border-b border-white/6 px-6 py-2.5">
               <span className="text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Claim</span>
@@ -508,7 +537,7 @@ export default function TrendsPage() {
               className="overflow-y-scroll"
               style={{
                 minHeight: "calc(5 * 57px)",
-                maxHeight: "calc(5 * 57px)",
+                maxHeight: "calc(5 * 80px)",
                 scrollbarWidth: "thin",
                 scrollbarColor: "rgba(255,255,255,0.20) rgba(255,255,255,0.04)",
               }}

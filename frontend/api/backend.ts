@@ -60,6 +60,12 @@ export async function getVideos(params?: { limit?: number; league?: string; chan
   return { videos: data.videos || data.data || [] };
 }
 
+export async function getVideosByLeague(limitPerLeague?: number) {
+  const searchParams = new URLSearchParams();
+  if (limitPerLeague) searchParams.set("limit_per_league", limitPerLeague.toString());
+  return apiFetch(`${API_BASE}/ingest/videos/by-league?${searchParams.toString()}`);
+}
+
 export async function getVideoById(videoId: string) {
   return apiFetch(`${API_BASE}/ingest/videos/${videoId}`);
 }

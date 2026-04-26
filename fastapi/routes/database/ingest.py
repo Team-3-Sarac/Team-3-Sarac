@@ -648,6 +648,44 @@ async def get_videos(
         videos.append(_doc_to_video_out(doc))
     return {"videos": videos, "count": len(videos)}
 
+
+# gets top videos per league for Trending Videos by League
+@router.get("/videos/by-league")
+async def get_videos_by_league(
+    limit_per_league: int = Query(default=10, ge=1, le=50),
+):
+    """Get top N videos per league in a single aggregation."""
+    KNOWN_LEAGUES = [
+        "Premier League",
+        "Champions League",
+        "La Liga",
+        "Bundesliga",
+        "Serie A",
+        "Ligue 1",
+    ]
+
+    pipeline = [
+        {"$match": {"league": {"$in": KNOWN_LEAGUES}}},
+        {"$addFields": {"league_single": {"$arrayElemAt": ["$league", 0]}}},
+        {"$match": {"league_single": {"$in": KNOWN_LEAGUES}}},
+        {"$sort": {"view_count": -1}},
+        {"$group": {
+            "_id": "$league_single",
+            "videos": {"$push": "$$ROOT"},
+        }},
+        {"$project": {
+            "videos": {"$slice": ["$videos", limit_per_league]},
+        }},
+    ]
+
+    result = {}
+    async for doc in db.videos.aggregate(pipeline):
+        league = doc["_id"]
+        result[league] = [_doc_to_video_out(v) for v in doc["videos"]]
+
+    return {"videos_by_league": result}
+
+
 # moved up from risk section because of dynamic routing error
 @router.get("/videos/risk")
 async def get_videos_with_risk(
@@ -878,9 +916,17 @@ async def get_dashboard_claims(
 
     claims = []
     async for doc in db.claims.aggregate(pipeline):
+        youtube_video_id = None
+        video_id = doc.get("video_id")
+        if video_id:
+            video_doc = await db.videos.find_one({"_id": video_id}, {"youtube_video_id": 1})
+            if video_doc:
+                youtube_video_id = video_doc.get("youtube_video_id")
+
         claims.append({
             "id": str(doc["_id"]),
             "video_id": str(doc.get("video_id")),
+            "youtube_video_id": youtube_video_id,
             "claim_text": doc.get("claim_text", ""), # removed character limit
             "sentiment": doc.get("sentiment"),
             "sentiment_pct": doc.get("sentiment_pct"),
@@ -901,6 +947,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.5,
                 "mentions": 12,
                 "narrative_category": "transfers",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
@@ -910,6 +957,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.3,
                 "mentions": 8,
                 "narrative_category": "tactics",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
@@ -919,6 +967,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.8,
                 "mentions": 15,
                 "narrative_category": "other",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         ]
