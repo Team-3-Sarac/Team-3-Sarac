@@ -775,8 +775,8 @@ async def get_dashboard_kpis():
     # Videos analyzed (total count)
     videos_analyzed = await db.videos.count_documents({})
 
-    # Trending topics (count from trends collection with status = trending, fallback to narratives)
-    trending_topics = await db.trends.count_documents({"status": "trending"})
+    # Trending narratives (count from trends collection)
+    trending_topics = await db.trends.count_documents({})
     if trending_topics == 0:
         # Fallback: count narratives if no trends exist yet
         trending_topics = await db.narratives.count_documents({})
@@ -795,6 +795,9 @@ async def get_dashboard_kpis():
     sentiment_result = await db.videos.aggregate(sentiment_pipeline).to_list(length=1)
     avg_sentiment = round(sentiment_result[0]["avg_sentiment"], 2) if sentiment_result and sentiment_result[0].get("avg_sentiment") else 0.5
 
+    # Trending claims count
+    trending_claims = await db.claims.count_documents({})
+
     # Channels tracked (distinct channel_id from videos)
     channels_tracked = len(await db.videos.distinct("channel_id"))
 
@@ -804,14 +807,10 @@ async def get_dashboard_kpis():
 
     # Topics since yesterday (from trends or narratives)
     yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    recent_trend_query = {
-        "created_at": {"$gte": yesterday},
-        "status": "trending"
-    }
-    topics_since_yesterday = await db.trends.count_documents(recent_trend_query)
+    topics_since_yesterday = await db.narratives.count_documents({"created_at": {"$gte": yesterday}})
     if topics_since_yesterday == 0:
-        # Fallback: count recent narratives
-        topics_since_yesterday = await db.narratives.count_documents({"created_at": {"$gte": yesterday}})
+        # Fallback: count trends
+        topics_since_yesterday = await db.trends.count_documents({"created_at": {"$gte": yesterday}})
 
     return {
         "videos_analyzed": videos_analyzed,
@@ -820,6 +819,7 @@ async def get_dashboard_kpis():
         "channels_tracked": channels_tracked,
         "videos_this_week": videos_this_week,
         "topics_since_yesterday": topics_since_yesterday,
+        "trending_claims": trending_claims,
     }
 
 

@@ -1,6 +1,15 @@
 import Badge from "../components/badge";
 import { Flame, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
+const VALID_LEAGUES = [
+  "Premier League",
+  "Champions League",
+  "La Liga",
+  "Bundesliga",
+  "Serie A",
+  "Ligue 1",
+];
+
 function ScoreBar({ score }: { score: number }) {
   // score is 0–1; normalise to 0–100
   const pct = Math.min(Math.max(score, 0), 1) * 100;
@@ -60,7 +69,7 @@ export default function TopicRow({
   return (
     <div className="grid grid-cols-12 gap-4 px-6 py-4 transition-colors hover:bg-[#161616] group">
       {/* Topic */}
-      <div className="col-span-5 flex items-start gap-3 min-w-0">
+      <div className="col-span-6 flex items-start gap-3 min-w-0">
         <div className="pt-0.5">
           {hot ? (
             <Flame className="h-3.5 w-3.5 shrink-0 text-orange-400 group-hover:animate-pulse" />
@@ -79,7 +88,7 @@ export default function TopicRow({
       </div>
 
       {/* Trend Score */}
-      <div className="col-span-3 flex items-center">
+      <div className="col-span-2 flex items-center justify-end">
         <ScoreBar score={score} />
       </div>
 
@@ -96,9 +105,12 @@ export default function TopicRow({
 
       {/* Leagues */}
       <div className="col-span-2 flex items-center justify-end gap-1 flex-wrap">
-        {leagues.slice(0, 2).map((l) => (
-          <Badge key={l} tone="neutral">{l}</Badge>
-        ))}
+        {leagues
+          .filter((l) => VALID_LEAGUES.includes(l))
+          .slice(0, 2)
+          .map((l) => (
+            <Badge key={l} tone="neutral">{l}</Badge>
+          ))}
       </div>
     </div>
   );

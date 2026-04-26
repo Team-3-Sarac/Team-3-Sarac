@@ -5,7 +5,6 @@ import Card from "../components/card";
 import CardHeader from "../components/cardHeader";
 import KpiCard from "../components/kpiCard";
 import VideoRow from "../components/videoRow";
-import EventRow from "../components/eventRow";
 import LeagueRow from "../components/leagueRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
@@ -16,6 +15,8 @@ import {
   getVideos,
   getEvents,
   getSentimentHistory,
+  getTrends,
+  getNarratives,
 } from "../../api/backend";
 
 import {
@@ -36,6 +37,7 @@ type KPIs = {
   channels_tracked: number;
   videos_this_week: number;
   topics_since_yesterday: number;
+  trending_claims: number;
 };
 
 type League = {
@@ -49,19 +51,13 @@ type VideoData = {
   title: string;
   channel_name: string;
   league: string | null;
+  teams: string[] | null;
   view_count: number;
   like_count: number;
   comment_count: number;
   duration_seconds: number;
   publish_date: string;
   sentiment_pct: number | null;
-};
-
-type Event = {
-  id: string;
-  event_type: string;
-  description: string;
-  created_at: string;
 };
 
 type SentimentData = {
@@ -132,16 +128,6 @@ function getSentimentLabel(value: number) {
   return "Negative";
 }
 
-function getEventIcon(eventType: string) {
-  switch (eventType) {
-    case "goal":     return <Sparkles className="h-3.5 w-3.5 text-emerald-400" />;
-    case "red_card": return <AlertTriangle className="h-3.5 w-3.5 text-red-400" />;
-    case "injury":   return <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />;
-    case "var":      return <TrendingUp className="h-3.5 w-3.5 text-sky-400" />;
-    default:         return <Sparkles className="h-3.5 w-3.5 text-neutral-500" />;
-  }
-}
-
 const leagueCodeMap: Record<string, string> = {
   "Premier League": "ENG",
   "Champions League": "UCL",
@@ -163,22 +149,6 @@ function ListSkeleton({ rows = 4 }: { rows?: number }) {
             <Skeleton className="h-3 w-20" />
             <Skeleton className="h-4 w-4/5" />
             <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EventSkeleton({ rows = 4 }: { rows?: number }) {
-  return (
-    <div className="divide-y divide-white/4">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="flex gap-3 px-6 py-4">
-          <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
-          <div className="flex flex-1 flex-col gap-2">
-            <Skeleton className="h-3.5 w-4/5" />
-            <Skeleton className="h-3 w-16" />
           </div>
         </div>
       ))}
@@ -213,20 +183,20 @@ export default function DashboardPage() {
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [videos, setVideos] = useState<VideoData[]>([]);
-  const [events, setEvents] = useState<Event[]>([]);
   const [sentimentHistory, setSentimentHistory] = useState<SentimentData[]>([]);
+  const [topNarratives, setTopNarratives] = useState<{ title: string; score: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [kpisError, setKpisError] = useState(false);
   const [leaguesError, setLeaguesError] = useState(false);
   const [videosError, setVideosError] = useState(false);
-  const [eventsError, setEventsError] = useState(false);
+  const [narrativesError, setNarrativesError] = useState(false);
   const [sentimentError, setSentimentError] = useState(false);
   const [activeLeague, setActiveLeague] = useState("All");
 
   const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
   const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
   const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
-  const animatedSentiment = useCountUp(kpis ? kpis.avg_sentiment * 100 : null);
+  const animatedClaims    = useCountUp(kpis?.trending_claims   ?? null);
 
   useEffect(() => {
     async function fetchData() {
@@ -238,13 +208,14 @@ export default function DashboardPage() {
           ),
         ]);
 
-      const [kpiRes, leagueRes, videoRes, eventsRes, sentimentRes] =
+      const [kpiRes, leagueRes, videoRes, sentimentRes, trendsRes, narrativesRes] =
         await Promise.allSettled([
           withTimeout(getDashboardKPIs(),           "getDashboardKPIs"),
           withTimeout(getLeagueStats(),             "getLeagueStats"),
           withTimeout(getVideos({ limit: 30 }),     "getVideos"),
-          withTimeout(getEvents(15),                 "getEvents"),
           withTimeout(getSentimentHistory(),        "getSentimentHistory"),
+          withTimeout(getTrends({ limit: 5 }),     "getTrends"),
+          withTimeout(getNarratives(),              "getNarratives"),
         ]);
 
       if (kpiRes.status === "fulfilled") {
@@ -255,7 +226,23 @@ export default function DashboardPage() {
       }
 
       if (leagueRes.status === "fulfilled") {
-        setLeagues((leagueRes.value.leagues || []).filter((l: League) => l.league !== "Unknown"));
+        const ALL_KNOWN_LEAGUES = [
+          "Premier League",
+          "Champions League",
+          "La Liga",
+          "Bundesliga",
+          "Serie A",
+          "Ligue 1",
+        ];
+        const fetched = (leagueRes.value.leagues || []).filter((l: League) => l.league !== "Unknown");
+        const fetchedNames = new Set(fetched.map((l: League) => l.league));
+        const merged = [
+          ...fetched,
+          ...ALL_KNOWN_LEAGUES
+            .filter((name) => !fetchedNames.has(name))
+            .map((name) => ({ league: name, count: 0, status: "" })),
+        ];
+        setLeagues(merged);
       } else {
         console.error("[Dashboard] League stats failed:", leagueRes.reason);
         setLeaguesError(true);
@@ -266,14 +253,6 @@ export default function DashboardPage() {
       } else {
         console.error("[Dashboard] Videos failed:", videoRes.reason);
         setVideosError(true);
-      }
-
-      if (eventsRes.status === "fulfilled") {
-        setEvents(eventsRes.value.events || []);
-      } else {
-        // Events are non-fatal — warn rather than error since the endpoint may not exist
-        console.warn("[Dashboard] Events failed (non-fatal):", eventsRes.reason);
-        setEventsError(true);
       }
 
       if (sentimentRes.status === "fulfilled") {
@@ -287,10 +266,25 @@ export default function DashboardPage() {
             negative: (w.negative ?? 0),
           })
         );
-        setSentimentHistory(formatted);
+        setSentimentHistory([...formatted].reverse());
       } else {
         console.error("[Dashboard] Sentiment history failed:", sentimentRes.reason);
         setSentimentError(true);
+      }
+
+      if (trendsRes.status === "fulfilled" && narrativesRes.status === "fulfilled") {
+        const narrativeMap = new Map<string, string>(
+          (narrativesRes.value.narratives || []).map((n: any) => [n.id, n.title])
+        );
+        const top = (trendsRes.value.trends || [])
+          .map((t: any) => ({
+            title: narrativeMap.get(t.narrative_id) || "Unknown",
+            score: Math.round(t.score * 100),
+          }));
+        setTopNarratives(top);
+      } else {
+        console.error("[Dashboard] Trends/narratives failed:", trendsRes, narrativesRes);
+        setNarrativesError(true);
       }
 
       setLoading(false);
@@ -303,8 +297,6 @@ export default function DashboardPage() {
     activeLeague === "All"
       ? videos
       : videos.filter((v) => v.league === activeLeague);
-
-      console.log("sentimentHistory length:", sentimentHistory.length);
 
   /* ── KPI sub-text helpers (guards against null/error/loading) ── */
   function kpiSub(errorFlag: boolean, loadedValue: string): string {
@@ -355,35 +347,35 @@ export default function DashboardPage() {
             icon={<Video className="h-3.5 w-3.5" />}
             title="Videos Analyzed"
             value={kpisError ? "—" : kpis ? formatNumber(animatedVideos) : "—"}
-            sub={kpiSub(kpisError, `+${kpis?.videos_this_week ?? 0} this week`)}
+            sub={kpiSub(kpisError, kpis ? `+${kpis.videos_this_week} this week` : "Loading…")}
             loading={loading}
           />
           <KpiCard
             icon={<TrendingUp className="h-3.5 w-3.5" />}
-            title="Trending Topics"
+            title="Trends Identified"
             value={kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—"}
-            sub={kpiSub(kpisError, `+${kpis?.topics_since_yesterday ?? 0} since yesterday`)}
+            sub={kpiSub(kpisError, kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…")}
             loading={loading}
           />
           <KpiCard
             icon={<Activity className="h-3.5 w-3.5" />}
-            title="Avg. Sentiment"
-            value={kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—"}
-            sub={kpiSub(kpisError, kpis ? getSentimentLabel(kpis.avg_sentiment) + " overall" : "—")}
+            title="Claims Extracted"
+            value={kpisError ? "—" : kpis ? formatNumber(animatedClaims) : "—"}
+            sub={kpiSub(kpisError, "From transcripts & comments")}
             loading={loading}
           />
           <KpiCard
             icon={<Users className="h-3.5 w-3.5" />}
             title="Channels Tracked"
             value={kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—"}
-            sub={kpiSub(kpisError, "6 leagues")}
+            sub={kpiSub(kpisError, "Across 6 leagues")}
             loading={loading}
           />
         </div>
 
-        {/* ── Sentiment + Events ── */}
+        {/* ── Sentiment + Trend Scores ── */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Card className="lg:col-span-2 flex flex-col min-h-[500]">
+          <Card className="lg:col-span-2 flex flex-col">
             <CardHeader
               title="Sentiment Trend"
               subtitle="Weekly fan sentiment across all videos"
@@ -413,34 +405,56 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card className="min-h-125">
+          <Card className="lg:col-span-1 flex flex-col min-h-125">
             <CardHeader
-              title="Key Events"
-              subtitle="Highlights detected across soccer matches"
+              title="Top Narratives"
+              subtitle="Highest scoring narratives by trend score"
             />
-            <div
-              className="divide-y divide-white/4 overflow-y-scroll"
-              style={{
-                maxHeight: "428px",
-                scrollbarWidth: "thin",
-                scrollbarColor: "rgba(255,255,255,0.20) rgba(255,255,255,0.04)",
-              }}
-            >
+            <div className="flex-1 px-6 pb-6 pt-2">
               {loading ? (
-                <EventSkeleton />
-              ) : eventsError ? (
-                <EmptyState message="Failed to load events" />
-              ) : events.length === 0 ? (
-                <EmptyState message="No events available" />
+                <Skeleton className="h-56 w-full" />
+              ) : narrativesError ? (
+                <EmptyState message="Failed to load narratives" />
+              ) : topNarratives.length === 0 ? (
+                <EmptyState message="No narrative data available" />
               ) : (
-                events.map((event) => (
-                  <EventRow
-                    key={event.id}
-                    icon={getEventIcon(event.event_type)}
-                    title={event.description}
-                    time={getRelativeTime(event.created_at)}
-                  />
-                ))
+                <div className="flex flex-col justify-between h-full">
+                  {topNarratives.map((n, i) => {
+                    const barColor =
+                      n.score >= 65
+                        ? "bg-emerald-400"
+                        : n.score >= 40
+                        ? "bg-amber-400"
+                        : "bg-red-400";
+                    const scoreColor =
+                      n.score >= 65
+                        ? "text-emerald-400"
+                        : n.score >= 40
+                        ? "text-amber-400"
+                        : "text-red-400";
+                    return (
+                      <div key={i} className="flex flex-col gap-1.5 py-3 border-b border-white/4 last:border-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="truncate text-[13px] font-medium text-white/85 leading-snug"
+                            title={n.title}
+                          >
+                            {n.title}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-[11px] text-neutral-400 w-7 text-right">
+                            {n.score}%
+                          </span>
+                        </div>
+                        <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+                            style={{ width: `${Math.min(n.score, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </Card>
@@ -448,7 +462,7 @@ export default function DashboardPage() {
 
         {/* ── Videos + League Overview ── */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Card className="lg:col-span-2 flex flex-col">
+          <Card className="lg:col-span-2 flex flex-col min-h-125">
             <CardHeader
               title="Trending Match Content"
               subtitle="Most watched soccer content from tracked channels"
@@ -503,6 +517,7 @@ export default function DashboardPage() {
                     key={video.video_id}
                     videoId={video.video_id}
                     league={video.league || ""}
+                    teams={video.teams || []}
                     sentiment={video.sentiment_pct != null ? `${Math.round(video.sentiment_pct * 100)}%` : "N/A"}
                     sentimentTone={video.sentiment_pct != null ? (video.sentiment_pct >= 0.6 ? "pos" : video.sentiment_pct >= 0.4 ? "neu" : "neg") : "neu"}
                     title={video.title}
@@ -540,6 +555,9 @@ export default function DashboardPage() {
                 <EmptyState message="No leagues available" />
               ) : (
                 [...leagues]
+                  .filter((l) =>
+                    ["Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"].includes(l.league)
+                  )
                   .sort((a, b) => {
                     const order = [
                       "Premier League",

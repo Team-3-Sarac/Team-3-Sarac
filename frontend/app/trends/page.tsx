@@ -22,6 +22,7 @@ type Trend = {
   mention_count: number;
   trending_direction: string;
   score: number;
+  change_pct: number;
   created_at: string;
   category?: string | null;
 };
@@ -69,21 +70,28 @@ type SortDir = "desc" | "asc";
 
 /* ---------------- Helpers ---------------- */
 
-function getChangeDir(direction: string): "up" | "down" | "flat" {
-  if (direction === "up") return "up";
-  if (direction === "down") return "down";
+function getChangeDir(change_pct: number): "up" | "down" | "flat" {
+  if (change_pct > 0) return "up";
+  if (change_pct < 0) return "down";
   return "flat";
 }
 
-function formatChange(direction: string, mentionCount: number): string {
-  if (direction === "up") return `+${Math.min(Math.round(mentionCount / 10), 50)}%`;
-  if (direction === "down") return `-${Math.min(Math.round(mentionCount / 10), 20)}%`;
-  return "0%";
+function formatChange(change_pct: number): string {
+  return `${Math.abs(change_pct).toFixed(1)}%`;
 }
 
+const VALID_LEAGUES = [
+  "Premier League",
+  "Champions League",
+  "La Liga",
+  "Bundesliga",
+  "Serie A",
+  "Ligue 1",
+];
+
 function getTopicLeague(trend: Trend): string[] {
-  if (!trend.league) return ["Multi-League"];
-  return [trend.league.length > 12 ? trend.league.substring(0, 12) + "…" : trend.league];
+  if (!trend.league || !VALID_LEAGUES.includes(trend.league)) return [];
+  return [trend.league];
 }
 
 function getNarrativeCategory(trend: Trend, narratives: Narrative[]): string | null {
@@ -355,7 +363,7 @@ export default function TrendsPage() {
             Trends
           </h1>
           <p className="mt-2 text-sm text-neutral-500">
-            Discover trending topics narratives, and claims across European soccer leagues
+            Discover trending topics, claims, and narratives across European soccer leagues
           </p>
         </div>
 
@@ -490,7 +498,7 @@ export default function TrendsPage() {
             {/* Table column headers */}
             <div className="grid grid-cols-12 gap-4 border-b border-white/4 px-6 py-2.5">
               <div className="col-span-5 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Topic</div>
-              <div className="col-span-3 text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Trend Score</div>
+              <div className="col-span-3 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Trend Score</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Mentions</div>
               <div className="col-span-1 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">Change</div>
               <div className="col-span-2 text-right text-[11px] font-semibold uppercase tracking-widest text-neutral-600">League</div>
@@ -521,8 +529,8 @@ export default function TrendsPage() {
                       topic={narrative?.title || "General Topic"}
                       description={narrative?.description || null}
                       mentions={trend.mention_count.toString()}
-                      change={formatChange(trend.trending_direction, trend.mention_count)}
-                      changeDir={getChangeDir(trend.trending_direction)}
+                      change={formatChange(trend.change_pct)}
+                      changeDir={getChangeDir(trend.change_pct)}
                       leagues={getTopicLeague(trend)}
                       score={trend.score}
                     />
