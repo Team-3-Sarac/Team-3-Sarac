@@ -29,9 +29,13 @@ export default function LineChartComponent() {
       try {
         const res = await getTrendsHistory();
         const history = res.history || [];
+        const total = history.length;
         const formatted = history.map((w: any, i: number) => ({
-          ...w,
-          week: `${i + 1} wk ago`,
+          transfers: w.transfers ?? 0,
+          injuries: w.injuries ?? 0,
+          tactics: w.tactics ?? 0,
+          controversy: w.controversy ?? 0,
+          week: `${total - i} wk ago`,
         }));
         setData(formatted);
       } catch (err) {

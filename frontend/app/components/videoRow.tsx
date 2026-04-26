@@ -11,6 +11,7 @@ import Badge from "../components/badge";
 export default function VideoRow({
   videoId,
   league,
+  teams,
   sentiment,
   sentimentTone,
   title,
@@ -23,6 +24,7 @@ export default function VideoRow({
 }: {
   videoId: string;
   league: string;
+  teams: string[];
   sentiment: string;
   sentimentTone: "pos" | "neu" | "neg";
   title: string;
@@ -62,8 +64,13 @@ export default function VideoRow({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          {league && <Badge tone="neutral">{league}</Badge>}
-          <Badge tone={sentimentTone}>{sentiment}</Badge>
+          {sentiment !== "N/A" && <Badge tone={sentimentTone}>{sentiment}</Badge>}
+          {["Premier League", "Champions League", "La Liga", "Bundesliga", "Serie A", "Ligue 1"].includes(league) && (
+            <Badge tone="neutral">{league}</Badge>
+          )}
+          {teams.slice(0, 2).map((team) => (
+            <Badge key={team} tone="neutral">{team}</Badge>
+          ))}
         </div>
         <div className="mt-2 line-clamp-1 text-[13px] font-semibold leading-snug text-white group-hover:text-teal-300 transition-colors">
           {title}

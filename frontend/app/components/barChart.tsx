@@ -32,15 +32,26 @@ export default function BarChartComponent() {
     async function fetchData() {
       try {
         const res = await getLeagueStats();
+        const ALL_LEAGUES = [
+          "Premier League",
+          "Champions League",
+          "La Liga",
+          "Bundesliga",
+          "Serie A",
+          "Ligue 1",
+        ];
         const leagues = res.leagues || [];
-        setData(
+        const fetchedMap = new Map(
           leagues
             .filter((l: LeagueData) => l.league && l.league !== "Unknown" && l.league !== "Unk")
-            .map((l: LeagueData) => ({
-              label: getLeagueShortName(l.league),
-              value: l.count,
-              full:  l.league,
-            }))
+            .map((l: LeagueData) => [l.league, l.count])
+        );
+        setData(
+          ALL_LEAGUES.map((league) => ({
+            label: getLeagueShortName(league),
+            value: (fetchedMap.get(league) ?? 0) as number,
+            full:  league,
+          }))
         );
       } catch (err) {
         console.error("[BarChart] Failed to fetch league stats:", err);
