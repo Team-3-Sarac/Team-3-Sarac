@@ -10,7 +10,7 @@ import TopicRow from "../components/topicRow";
 import SectionLabel from "../components/sectionLabel";
 import EmptyState from "../components/emptyState";
 import { getTrends, getNarratives, getDashboardClaims } from "../../api/backend";
-import { ArrowUpDown, Youtube } from "lucide-react";
+import { ArrowUpDown } from "lucide-react";
 
 /* ---------------- Types ---------------- */
 
@@ -52,7 +52,6 @@ type Claim = {
   mentions?: number;
   narrative_category?: string | null;
   source?: string | null;
-  youtube_video_id?: string | null;
   created_at: string;
 };
 
@@ -237,19 +236,8 @@ function EnhancedClaimRow({ claim }: { claim: Claim }) {
             </button>
           )}
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            {claim.youtube_video_id && (
-              <a
-                href={`https://www.youtube.com/watch?v=${claim.youtube_video_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md bg-white/8 px-2.5 py-1 text-[11px] font-medium text-neutral-400 ring-1 ring-inset ring-white/10 transition-all duration-150 hover:bg-teal-500/10 hover:text-teal-300 hover:ring-teal-500/20 active:scale-95"
-              >
-                <Youtube className="h-3 w-3" />
-                Watch on YouTube
-              </a>
-            )}
             {claim.source && (
-              <Badge tone="neutral">
+              <Badge tone={claim.source === "transcript" ? "teal" : "sky"}>
                 {claim.source === "transcript" ? "Transcript" : "Comment"}
               </Badge>
             )}
