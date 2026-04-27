@@ -124,11 +124,10 @@ function TableSkeleton({ rows = 6 }: { rows?: number }) {
             <Skeleton className="h-3.5 w-10" />
             <Skeleton className="h-5 w-16 rounded-md" />
           </div>
-          <div className="col-span-2 flex flex-col gap-1.5">
+          <div className="col-span-3 flex flex-col gap-1.5">
             <Skeleton className="h-3.5 w-full" />
             <Skeleton className="h-3 w-16" />
           </div>
-          <div className="col-span-1 flex justify-end"><Skeleton className="h-5 w-9 rounded-full" /></div>
         </div>
       ))}
     </div>

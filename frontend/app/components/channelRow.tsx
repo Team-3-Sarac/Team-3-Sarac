@@ -17,12 +17,6 @@ type ChannelRowData = {
   riskLevel?: "low" | "medium" | "high" | "critical" | null;
 };
 
-function getSentimentLabel(pct: number): string {
-  if (pct >= 0.6) return "Positive";
-  if (pct >= 0.4) return "Neutral";
-  return "Negative";
-}
-
 function getRiskLabel(score: number): string {
   if (score >= 76) return "Critical";
   if (score >= 51) return "High";
@@ -84,9 +78,6 @@ export default function ChannelRow({
   row: ChannelRowData;
   onRiskClick?: () => void;
 }) {
-  const sentimentTone =
-    row.sentimentPct == null ? "neu" :
-    row.sentimentPct >= 0.6 ? "pos" : row.sentimentPct >= 0.4 ? "neu" : "neg";
 
   const SentimentIcon =
     row.sentimentDir === "up"
