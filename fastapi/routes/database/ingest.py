@@ -169,15 +169,15 @@ async def ingest_videos(videos: list[Video]):
         doc["league"] = []
         if "ucl" in title_lower or "champions league" in title_lower:
             doc["league"].append("Champions League")
-        if "premier league" in title_lower:
+        if "premier league" in title_lower or "premier league" in channel.lower():
             doc["league"].append("Premier League")
-        if "laliga" in title_lower or "la liga" in title_lower:
+        if "laliga" in title_lower or "la liga" in title_lower or "laliga" in channel.lower():
             doc["league"].append("La Liga")
         if "bundesliga" in title_lower or "bundesliga" in channel.lower():
             doc["league"].append("Bundesliga")
-        if "serie a" in title_lower:
+        if "serie a" in title_lower or "serie a" in channel.lower():
             doc["league"].append("Serie A")
-        if "ligue 1" in title_lower or "ligue1" in title_lower:
+        if "ligue 1" in title_lower or "ligue1" in title_lower or "ligue 1" in channel.lower():
             doc["league"].append("Ligue 1")
 
         # team extraction
