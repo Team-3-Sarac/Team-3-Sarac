@@ -57,11 +57,27 @@ CHANNEL_IDS = [
 
 def get_youtube_client():
     """Creates a new client instance for thread safety."""
-    return build("youtube", "v3", developerKey=_require_api_key(), static_discovery=False)
+    return build("youtube", "v3", developerKey=_require_api_key(), static_discovery=True)
+
+def _derive_uploads_playlist_id(channel_id):
+    if channel_id.startswith("UC") and len(channel_id) > 2:
+        return "UU" + channel_id[2:]
+    return None
+
 
 def get_uploads_playlist(client, channel_id):
-    response = client.channels().list( part="contentDetails", id=channel_id).execute() 
-    return response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+    try:
+        response = client.channels().list(part="contentDetails", id=channel_id).execute()
+        return response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+    except Exception as exc:
+        fallback_playlist_id = _derive_uploads_playlist_id(channel_id)
+        if fallback_playlist_id:
+            print(
+                f"Falling back to derived uploads playlist for {channel_id}: {fallback_playlist_id} "
+                f"(channels.list failed: {exc})"
+            )
+            return fallback_playlist_id
+        raise
 
 
 def is_relevant(snippet, keywords, exclude_keywords):
