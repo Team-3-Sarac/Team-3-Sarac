@@ -60,6 +60,12 @@ export async function getVideos(params?: { limit?: number; league?: string; chan
   return { videos: data.videos || data.data || [] };
 }
 
+export async function getVideosByLeague(limitPerLeague?: number) {
+  const searchParams = new URLSearchParams();
+  if (limitPerLeague) searchParams.set("limit_per_league", limitPerLeague.toString());
+  return apiFetch(`${API_BASE}/ingest/videos/by-league?${searchParams.toString()}`);
+}
+
 export async function getVideoById(videoId: string) {
   return apiFetch(`${API_BASE}/ingest/videos/${videoId}`);
 }
@@ -117,6 +123,7 @@ export async function getDashboardKPIs() {
     channels_tracked:       data.channels_tracked       ?? data.total_channels ?? 0,
     videos_this_week:       data.videos_this_week       ?? 0,
     topics_since_yesterday: data.topics_since_yesterday ?? 0,
+    trending_claims:        data.trending_claims        ?? 0,
   };
 }
 
@@ -133,9 +140,10 @@ export async function getTrendsHistory() {
   return apiFetch(`${API_BASE}/ingest/trends/history`);
 }
 
-export async function getDashboardClaims(limit?: number) {
+export async function getDashboardClaims(limit?: number, daysBack?: number) {
   const searchParams = new URLSearchParams();
   if (limit) searchParams.set("limit", limit.toString());
+  if (daysBack) searchParams.set("days_back", daysBack.toString());
 
   return apiFetch(`${API_BASE}/ingest/dashboard/claims?${searchParams.toString()}`);
 }

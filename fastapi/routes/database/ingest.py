@@ -193,15 +193,15 @@ async def ingest_videos(videos: list[Video]):
         doc["league"] = []
         if "ucl" in title_lower or "champions league" in title_lower:
             doc["league"].append("Champions League")
-        if "premier league" in title_lower:
+        if "premier league" in title_lower or "premier league" in channel.lower():
             doc["league"].append("Premier League")
-        if "laliga" in title_lower or "la liga" in title_lower:
+        if "laliga" in title_lower or "la liga" in title_lower or "laliga" in channel.lower():
             doc["league"].append("La Liga")
         if "bundesliga" in title_lower or "bundesliga" in channel.lower():
             doc["league"].append("Bundesliga")
-        if "serie a" in title_lower:
+        if "serie a" in title_lower or "serie a" in channel.lower():
             doc["league"].append("Serie A")
-        if "ligue 1" in title_lower or "ligue1" in title_lower:
+        if "ligue 1" in title_lower or "ligue1" in title_lower or "ligue 1" in channel.lower():
             doc["league"].append("Ligue 1")
 
         # team extraction
@@ -618,7 +618,7 @@ def _doc_to_video_out(doc: dict, public_channel_id: str | None = None) -> VideoO
         comment_count=doc.get("comment_count", 0),
         duration_seconds=doc.get("duration_seconds", 0),
         summary=doc.get("summary"),
-        sentiment_pct=doc.get("sentiment_pct") or 0.5,
+        sentiment_pct=doc.get("sentiment_pct"),
         risk_score=doc.get("risk_score", 0),
         risk_level=doc.get("risk_level", "low"),
         risk_breakdown=doc.get("risk_breakdown"),
@@ -662,6 +662,44 @@ async def get_videos(
         for doc in video_docs
     ]
     return {"videos": videos, "count": len(videos)}
+
+
+# gets top videos per league for Trending Videos by League
+@router.get("/videos/by-league")
+async def get_videos_by_league(
+    limit_per_league: int = Query(default=10, ge=1, le=50),
+):
+    """Get top N videos per league in a single aggregation."""
+    KNOWN_LEAGUES = [
+        "Premier League",
+        "Champions League",
+        "La Liga",
+        "Bundesliga",
+        "Serie A",
+        "Ligue 1",
+    ]
+
+    pipeline = [
+        {"$match": {"league": {"$in": KNOWN_LEAGUES}}},
+        {"$addFields": {"league_single": {"$arrayElemAt": ["$league", 0]}}},
+        {"$match": {"league_single": {"$in": KNOWN_LEAGUES}}},
+        {"$sort": {"view_count": -1}},
+        {"$group": {
+            "_id": "$league_single",
+            "videos": {"$push": "$$ROOT"},
+        }},
+        {"$project": {
+            "videos": {"$slice": ["$videos", limit_per_league]},
+        }},
+    ]
+
+    result = {}
+    async for doc in db.videos.aggregate(pipeline):
+        league = doc["_id"]
+        result[league] = [_doc_to_video_out(v) for v in doc["videos"]]
+
+    return {"videos_by_league": result}
+
 
 # moved up from risk section because of dynamic routing error
 @router.get("/videos/risk")
@@ -777,19 +815,28 @@ async def get_dashboard_kpis():
     # Videos analyzed (total count)
     videos_analyzed = await db.videos.count_documents({})
 
-    # Trending topics (count from trends collection with status = trending, fallback to narratives)
-    trending_topics = await db.trends.count_documents({"status": "trending"})
+    # Trending narratives (count from trends collection)
+    trending_topics = await db.trends.count_documents({})
     if trending_topics == 0:
         # Fallback: count narratives if no trends exist yet
         trending_topics = await db.narratives.count_documents({})
 
     # Avg sentiment - calculate from videos if available
     sentiment_pipeline = [
-        {"$match": {"sentiment_pct": {"$ne": None, "$ne": 0}}},
+        {"$lookup": {
+            "from": "claims",
+            "localField": "_id",
+            "foreignField": "video_id",
+            "as": "claims"
+        }},
+        {"$match": {"claims": {"$not": {"$size": 0}}}},
         {"$group": {"_id": None, "avg_sentiment": {"$avg": "$sentiment_pct"}}}
     ]
     sentiment_result = await db.videos.aggregate(sentiment_pipeline).to_list(length=1)
-    avg_sentiment = round(sentiment_result[0]["avg_sentiment"], 1) if sentiment_result and sentiment_result[0].get("avg_sentiment") else 0
+    avg_sentiment = round(sentiment_result[0]["avg_sentiment"], 2) if sentiment_result and sentiment_result[0].get("avg_sentiment") else 0.5
+
+    # Trending claims count
+    trending_claims = await db.claims.count_documents({})
 
     # Channels tracked (distinct channel_id from videos)
     channels_tracked = len(await db.videos.distinct("channel_id"))
@@ -800,14 +847,10 @@ async def get_dashboard_kpis():
 
     # Topics since yesterday (from trends or narratives)
     yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-    recent_trend_query = {
-        "created_at": {"$gte": yesterday},
-        "status": "trending"
-    }
-    topics_since_yesterday = await db.trends.count_documents(recent_trend_query)
+    topics_since_yesterday = await db.narratives.count_documents({"created_at": {"$gte": yesterday}})
     if topics_since_yesterday == 0:
-        # Fallback: count recent narratives
-        topics_since_yesterday = await db.narratives.count_documents({"created_at": {"$gte": yesterday}})
+        # Fallback: count trends
+        topics_since_yesterday = await db.trends.count_documents({"created_at": {"$gte": yesterday}})
 
     return {
         "videos_analyzed": videos_analyzed,
@@ -816,6 +859,7 @@ async def get_dashboard_kpis():
         "channels_tracked": channels_tracked,
         "videos_this_week": videos_this_week,
         "topics_since_yesterday": topics_since_yesterday,
+        "trending_claims": trending_claims,
     }
 
 
@@ -868,15 +912,23 @@ async def get_dashboard_claims(
                 ]
             }
         }},
-        {"$sort": {"score": -1}},
+        {"$sort": {"score": -1, "created_at": -1}},
         {"$limit": limit},
     ]
 
     claims = []
     async for doc in db.claims.aggregate(pipeline):
+        youtube_video_id = None
+        video_id = doc.get("video_id")
+        if video_id:
+            video_doc = await db.videos.find_one({"_id": video_id}, {"youtube_video_id": 1})
+            if video_doc:
+                youtube_video_id = video_doc.get("youtube_video_id")
+
         claims.append({
             "id": str(doc["_id"]),
             "video_id": str(doc.get("video_id")),
+            "youtube_video_id": youtube_video_id,
             "claim_text": doc.get("claim_text", ""), # removed character limit
             "sentiment": doc.get("sentiment"),
             "sentiment_pct": doc.get("sentiment_pct"),
@@ -897,6 +949,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.5,
                 "mentions": 12,
                 "narrative_category": "transfers",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
@@ -906,6 +959,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.3,
                 "mentions": 8,
                 "narrative_category": "tactics",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
@@ -915,6 +969,7 @@ async def get_dashboard_claims(
                 "sentiment_pct": 0.8,
                 "mentions": 15,
                 "narrative_category": "other",
+                "youtube_video_id": "dQw4w9WgXcQ",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         ]
@@ -1196,6 +1251,30 @@ async def get_channels_with_risk(
                     }
                 ],
                 "as": "risk_stats"
+            "$group": {
+                "_id": "$channel_id",
+                "channel_name": {"$first": {"$ifNull": ["$channel_name", "Unknown Channel"]}},
+                "video_count": {"$sum": 1},
+                "total_views": {"$sum": {"$ifNull": ["$view_count", 0]}},
+                "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
+                "total_comments": {"$sum": {"$ifNull": ["$comment_count", 0]}},
+                "avg_score": {"$avg": "$risk_score"},
+                "videos_with_risk": {
+                    "$sum": {
+                        "$cond": [
+                            {"$ne": ["$risk_score", None]},
+                            1,
+                            0,
+                        ]
+                    }
+                },
+                "avg_self_harm": {"$avg": "$risk_breakdown.self_harm"},
+                "avg_violence": {"$avg": "$risk_breakdown.violence"},
+                "avg_illegal_activities": {"$avg": "$risk_breakdown.illegal_activities"},
+                "avg_misinformation": {"$avg": "$risk_breakdown.misinformation"},
+                "avg_hate_speech": {"$avg": "$risk_breakdown.hate_speech"},
+                "avg_harassment": {"$avg": "$risk_breakdown.harassment"},
+                "avg_toxicity": {"$avg": "$risk_breakdown.toxicity"}
             }
         },
         {
@@ -1228,6 +1307,9 @@ async def get_channels_with_risk(
                 "computed_risk_level": {
                     "$cond": [
                         {"$eq": ["$risk_stats.videos_with_risk", 0]},
+                "risk_level": {
+                    "$cond": [
+                        {"$eq": ["$videos_with_risk", 0]},
                         None,
                         {
                             "$switch": {
@@ -1235,6 +1317,9 @@ async def get_channels_with_risk(
                                     {"case": {"$gte": ["$risk_stats.avg_score", 76]}, "then": "critical"},
                                     {"case": {"$gte": ["$risk_stats.avg_score", 51]}, "then": "high"},
                                     {"case": {"$gte": ["$risk_stats.avg_score", 26]}, "then": "medium"}
+                                    {"case": {"$gte": ["$avg_score", 76]}, "then": "critical"},
+                                    {"case": {"$gte": ["$avg_score", 51]}, "then": "high"},
+                                    {"case": {"$gte": ["$avg_score", 26]}, "then": "medium"}
                                 ],
                                 "default": "low"
                             }
@@ -1317,6 +1402,33 @@ async def get_channels_with_risk(
                 "total_comments": doc.get("total_comments", 0),
                 "videos_with_risk": videos_with_risk,
                 "risk_score": safe_round(doc.get("risk_score")) if videos_with_risk > 0 else None,
+        async for doc in db.videos.aggregate(pipeline):
+            def safe_round(val):
+                return round(val, 2) if val is not None else None
+
+            videos_with_risk = doc.get("videos_with_risk", 0)
+            risk_breakdown = None
+            if videos_with_risk > 0:
+                risk_breakdown = {
+                    "self_harm": safe_round(doc.get("avg_self_harm")),
+                    "violence": safe_round(doc.get("avg_violence")),
+                    "illegal_activities": safe_round(doc.get("avg_illegal_activities")),
+                    "misinformation": safe_round(doc.get("avg_misinformation")),
+                    "hate_speech": safe_round(doc.get("avg_hate_speech")),
+                    "harassment": safe_round(doc.get("avg_harassment")),
+                    "toxicity": safe_round(doc.get("avg_toxicity")),
+                }
+
+            channels.append({
+                "id": str(doc["_id"]), # Internal ObjectId
+                "channel_id": doc["channel_info"].get("channel_id"), # 'UC...' string
+                "channel_name": doc["channel_name"],
+                "video_count": doc["video_count"],
+                "total_views": doc["total_views"],
+                "total_likes": doc["total_likes"],
+                "total_comments": doc["total_comments"],
+                "videos_with_risk": videos_with_risk,
+                "risk_score": safe_round(doc.get("avg_score")) if videos_with_risk > 0 else None,
                 "risk_level": doc.get("risk_level") if videos_with_risk > 0 else None,
                 "risk_breakdown": risk_breakdown,
             })

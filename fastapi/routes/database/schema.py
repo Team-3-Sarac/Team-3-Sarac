@@ -13,20 +13,39 @@ class PyObjectId(str):
     Accepts an ObjectId instance or any 24-char hex string on input;
     always serialises to str so JSON responses work without extra config.
     """
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            cls.validate,
-            json_schema_input_schema=core_schema.str_schema()
+        def _validate(value: Any) -> "PyObjectId":
+            if isinstance(value, ObjectId):
+                return cls(str(value))
+            if isinstance(value, str) and ObjectId.is_valid(value):
+                return cls(value)
+            raise ValueError(f"Invalid ObjectId: {value!r}")
+
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.no_info_plain_validator_function(
+                _validate,
+                json_schema_input_schema=core_schema.str_schema(),
+            ),
+            python_schema=core_schema.union_schema(
+                [
+                    core_schema.is_instance_schema(ObjectId),
+                    core_schema.str_schema(),
+                ]
+            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(lambda v: str(v)),
         )
 
     @classmethod
     def __get_pydantic_json_schema__(
         cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
     ) -> JsonSchemaValue:
-        return {"type": "string", "format": "objectid"}
+        json_schema = handler(core_schema.str_schema())
+        json_schema.update({"format": "objectid"})
+        return json_schema
 
     @classmethod
     def validate(cls, v: Any) -> "PyObjectId":
@@ -67,7 +86,7 @@ class Video(BaseModel):
     comment_count: int
     duration_seconds: int
     summary: Optional[str] = None
-    sentiment_pct: float = 0.0 # Red text requirement: sentiment for trending matches
+    sentiment_pct: Optional[float] = None # Null means not analyzed yet
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     risk_breakdown: Optional[dict] = None
@@ -214,7 +233,7 @@ class VideoOut(BaseModel):
     comment_count: int
     duration_seconds: int
     summary: Optional[str] = None
-    sentiment_pct: float = 0.0 # Red text requirement: sentiment for trending matches
+    sentiment_pct: Optional[float] = None # Null means not analyzed yet
     risk_score: Optional[float] = None
     risk_level: Optional[str] = None
     risk_breakdown: Optional[dict] = None

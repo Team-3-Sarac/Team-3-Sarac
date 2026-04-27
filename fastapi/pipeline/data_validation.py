@@ -4,7 +4,7 @@ Data Validation Script for Claims
 Purpose:
 - validates claim data integrity before narrative processing
 - detects malformed claims (missing fields, invalid structure)
-- identifys broken links 
+- identifiess broken links
 - detects duplicates and logs inconsistencies for debugging and monitoring
 
 Usage:
@@ -15,6 +15,10 @@ Notes:
 - Designed to ensure clean input for narrative clustering and trend analysis.
 """
 
+import os
+import sys
+import asyncio
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from routes.database.database import db
 from bson import ObjectId
 
@@ -72,7 +76,7 @@ async def validate_claims_data():
         # checks for no matching video
         video_exists = False
         try:
-            video_obj_id = ObjectId(video_id)
+            video_obj_id = ObjectId(video_id)   if isinstance(video_id, str) else video_id
             video_exists = await videos_collection.find_one({"_id": video_obj_id})
         except:
             video_exists = await videos_collection.find_one({"video_id": video_id})
@@ -102,3 +106,6 @@ async def validate_claims_data():
     print(f"  Invalid (malformed): {malformed}")
     print(f"  Broken links:        {broken_links}")
     print(f"  Duplicates:          {duplicates}")
+
+if __name__ == "__main__":
+    asyncio.run(validate_claims_data())

@@ -39,6 +39,22 @@ EXCLUDE_KEYWORDS = [
     "slam dunk", "quarterback"
 ]
 
+# Single source of truth for the tracked YouTube channel IDs.
+# Add / remove entries here and every caller picks up the change.
+CHANNEL_IDS = [
+    "UCET00YnetHT7tOpu12v8jxg",  # CBS Sports Golazo - Serie A, Champions League
+    "UCqZQlzSHbVJrwrn5XvzrzcA",  # NBC Sports - Premier League
+    "UC6c1z7bA__85CIWZ_jpCK-Q",  # ESPN FC - La Liga, Bundesliga
+    "UC0YatYmg5JRYzXJPxIdRd8g",  # beIN Sports USA - Ligue 1
+    "UC6UL29enLNe4mqwTfAyeNuw",  # Bundesliga - Bundesliga
+    "UCNAf1k0yIjyGu3k9BwAg3lg",  # Sky Sports Premier League - Premier League commentary
+    "UCm2brsr0Is2iH1acAI3Sb4w",  # Football Iconic - Overall commentary
+    "UC2NB_acBZHQIeqxTaWj2dVQ",  # Maqwell - International and overall commentary
+    "UCTv-XvfzLX3i4IGWAm4sbmA",  # LaLiga - La Liga official channel
+    "UCBJeMCIeLQos7wacox4hmLQ",  # Serie A - Serie A official channel
+    "UCQsH5XtIc9hONE1BQjucM0g"   # Ligue 1 McDonald's - Ligue 1 official channel
+]
+
 def get_youtube_client():
     """Creates a new client instance for thread safety."""
     return build("youtube", "v3", developerKey=_require_api_key(), static_discovery=False)
@@ -183,16 +199,7 @@ async def ingest_from_channels(channel_ids, days_back, keywords, exclude_keyword
     return all_videos
 
 if __name__ == "__main__":
-
-    channel_ids = [
-        "UCET00YnetHT7tOpu12v8jxg",
-        "UCqZQlzSHbVJrwrn5XvzrzcA",
-        "UC6c1z7bA__85CIWZ_jpCK-Q",
-        "UC0YatYmg5JRYzXJPxIdRd8g",
-        "UC6UL29enLNe4mqwTfAyeNuw"
-    ]
-
-    all_videos = asyncio.run(ingest_from_channels(channel_ids, DAYS_BACK, KEYWORDS, EXCLUDE_KEYWORDS))
+    all_videos = asyncio.run(ingest_from_channels(CHANNEL_IDS, DAYS_BACK, KEYWORDS, EXCLUDE_KEYWORDS))
 
 # Save results to JSON file
     script_dir = os.path.dirname(os.path.abspath(__file__))

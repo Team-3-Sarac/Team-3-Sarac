@@ -14,6 +14,7 @@ type KPIs = {
   channels_tracked: number;
   videos_this_week: number;
   topics_since_yesterday: number;
+  trending_claims: number;
 };
 
 /* ---------------- Helpers ---------------- */
@@ -91,7 +92,7 @@ export default function LandingPage() {
 
   const animatedVideos    = useCountUp(kpis?.videos_analyzed   ?? null);
   const animatedTopics    = useCountUp(kpis?.trending_topics   ?? null);
-  const animatedSentiment = useCountUp(kpis ? kpis.avg_sentiment * 100 : null);
+  const animatedClaims    = useCountUp(kpis?.trending_claims    ?? null);
   const animatedChannels  = useCountUp(kpis?.channels_tracked  ?? null);
 
   useEffect(() => {
@@ -113,25 +114,21 @@ export default function LandingPage() {
     },
     {
       icon: <TrendingUp className="h-3.5 w-3.5" />,
-      title: "Trending Topics",
+      title: "Trends Identified",
       value: kpisError ? "—" : kpis ? formatNumber(animatedTopics) : "—",
       sub: kpisError ? "Failed to load" : kpis ? `+${kpis.topics_since_yesterday} since yesterday` : "Loading…",
     },
     {
       icon: <Activity className="h-3.5 w-3.5" />,
-      title: "Avg. Sentiment",
-      value: kpisError ? "—" : kpis ? `${Math.round(animatedSentiment)}%` : "—",
-      sub: kpisError ? "Failed to load" : kpis
-        ? kpis.avg_sentiment >= 0.6 ? "Positive overall"
-        : kpis.avg_sentiment >= 0.4 ? "Neutral overall"
-        : "Negative overall"
-        : "Loading…",
+      title: "Claims Extracted",
+      value: kpisError ? "—" : kpis ? formatNumber(animatedClaims) : "—",
+      sub: kpisError ? "Failed to load" : kpis ? "From transcripts & comments" : "Loading…",
     },
     {
       icon: <Users className="h-3.5 w-3.5" />,
       title: "Channels Tracked",
       value: kpisError ? "—" : kpis ? formatNumber(animatedChannels) : "—",
-      sub: kpisError ? "Failed to load" : `${LEAGUES.length} leagues`,
+      sub: kpisError ? "Failed to load" : kpis ? "Across 6 leagues" : "Loading...",
     },
   ];
 
@@ -324,7 +321,7 @@ export default function LandingPage() {
                 step: "01",
                 icon: <Radio className="h-5 w-5 text-neutral-400" />,
                 title: "Ingest & Index",
-                desc: "MatchIQ continuously pulls video metadata, transcripts, and engagement signals from tracked YouTube channels across five major European leagues, building a structured index of soccer content.",
+                desc: "MatchIQ continuously pulls video metadata, transcripts, and engagement signals from tracked YouTube channels across six major European leagues, building a structured index of soccer content.",
               },
               {
                 step: "02",

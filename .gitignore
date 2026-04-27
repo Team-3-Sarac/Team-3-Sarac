@@ -11,3 +11,4 @@ __pycache__/
 .qwen/
 .qwen/
 node_modules/
+fastapi/routes/yt_cookies.txt
