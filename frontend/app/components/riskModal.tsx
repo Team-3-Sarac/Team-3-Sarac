@@ -91,7 +91,7 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
     <div className="h-2 w-full rounded-full bg-neutral-800 overflow-hidden">
       <div
         className={`h-full rounded-full ${color}`}
-        style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }}
+        style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
       />
     </div>
   );
@@ -172,7 +172,7 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
           {/* Risk Breakdown */}
           {riskAvailable && channelData.risk_breakdown && Object.keys(channelData.risk_breakdown).length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-white mb-4">Risk Category Breakdown</h3>
+              <h3 className="text-sm font-semibold text-white mb-4">Risk Category Scores</h3>
               <div className="space-y-3">
                 {Object.entries(channelData.risk_breakdown).map(([key, value]) => (
                   <div key={key} className="space-y-1">
@@ -181,17 +181,17 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
                         {getRiskCategoryLabel(key)}
                       </span>
                       <span className="text-sm font-medium text-neutral-400">
-                        {Math.round((value || 0) * 100)}%
+                        {Math.round(value || 0)}/100
                       </span>
                     </div>
                     <ProgressBar
                       value={value || 0}
                       color={
-                        (value || 0) >= 0.75
+                        (value || 0) >= 76
                           ? "bg-red-500"
-                          : (value || 0) >= 0.5
+                          : (value || 0) >= 51
                           ? "bg-orange-500"
-                          : (value || 0) >= 0.25
+                          : (value || 0) >= 26
                           ? "bg-yellow-500"
                           : "bg-emerald-500"
                       }
@@ -243,7 +243,7 @@ export default function RiskModal({ isOpen, onClose, channelData }: RiskModalPro
             <p className="text-xs text-blue-300">
               <strong>Note:</strong> Risk scores are calculated using AI analysis of video transcripts.
               {riskAvailable
-                ? " Scores are aggregated at the channel level from all analyzed videos. Categories with higher scores indicate more frequent or severe risk indicators."
+                ? " Scores are aggregated at the channel level from all analyzed videos. Category values are risk scores out of 100, not percentages of a whole. Higher scores indicate more frequent or severe risk indicators."
                 : " This creator does not have transcript-backed risk analysis yet, so no score is shown."}
             </p>
           </div>
