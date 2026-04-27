@@ -41,6 +41,30 @@ async def _build_channel_id_lookup() -> dict[str, object]:
         lookup[doc["channel_id"]] = doc["_id"]
     return lookup
 
+async def _build_public_channel_lookup() -> dict[str, str]:
+    """Map internal MongoDB channel ObjectId string -> public YouTube channel ID."""
+    cursor = db.channels.find({}, {"channel_id": 1})
+    lookup = {}
+    async for doc in cursor:
+        lookup[str(doc["_id"])] = doc["channel_id"]
+    return lookup
+
+async def _resolve_channel_refs(channel_id: str) -> list[object]:
+    """Resolve a channel identifier to all supported video references.
+
+    Supports both the current ObjectId linkage and legacy YouTube channel ID linkage.
+    """
+    if ObjectId.is_valid(channel_id):
+        channel_doc = await db.channels.find_one({"_id": ObjectId(channel_id)}, {"channel_id": 1})
+        if not channel_doc:
+            raise HTTPException(status_code=404, detail=f"Channel with ID {channel_id} not found")
+        return [channel_doc["_id"], channel_doc["channel_id"]]
+
+    channel_doc = await db.channels.find_one({"channel_id": channel_id}, {"channel_id": 1})
+    if not channel_doc:
+        raise HTTPException(status_code=404, detail=f"Channel with ID {channel_id} not found")
+    return [channel_doc["_id"], channel_doc["channel_id"]]
+
 async def _refresh_channel_metadata(channel_oids: list[ObjectId]):
     """Recalculate video_count and latest_video for specific channels by ObjectId."""
 
@@ -572,7 +596,7 @@ async def ingest_channel_stats(stats: list[ChannelStats]):
 # ============== GET Endpoints ==============
 
 
-def _doc_to_video_out(doc: dict) -> VideoOut:
+def _doc_to_video_out(doc: dict, public_channel_id: str | None = None) -> VideoOut:
     """Convert MongoDB video document to VideoOut schema."""
     league_raw = doc.get("league")
     if isinstance(league_raw, list):
@@ -584,7 +608,7 @@ def _doc_to_video_out(doc: dict) -> VideoOut:
         video_id=doc["youtube_video_id"],
         title=doc["title"],
         thumbnail_url=doc.get("thumbnail_url"),
-        channel_id=str(doc["channel_id"]),
+        channel_id=public_channel_id or str(doc["channel_id"]),
         channel_name=doc.get("channel_name", ""),
         publish_date=doc["publish_date"].isoformat() if isinstance(doc["publish_date"], datetime) else doc["publish_date"],
         league=league,
@@ -627,25 +651,16 @@ async def get_videos(
         query["league"] = league
 
     if channel_id:
-        if ObjectId.is_valid(channel_id):
-            # Case A: It's already a Mongo ID (Fastest)
-            query["channel_id"] = ObjectId(channel_id)
-        else:
-            # Case B: It might be a YouTube UC... ID (Requires Lookup)
-            channel_doc = await db.channels.find_one({"channel_id": channel_id}, {"_id": 1})
-            if channel_doc:
-                query["channel_id"] = channel_doc["_id"]
-            else:
-                # Case C: Not a Mongo ID and not found as a YouTube ID
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Channel with ID {channel_id} not found."
-                )
+        query["channel_id"] = {"$in": await _resolve_channel_refs(channel_id)}
 
     cursor = db.videos.find(query).sort("created_at", -1).limit(limit)
-    videos = []
-    async for doc in cursor:
-        videos.append(_doc_to_video_out(doc))
+    video_docs = await cursor.to_list(length=limit)
+    public_channel_lookup = await _build_public_channel_lookup()
+
+    videos = [
+        _doc_to_video_out(doc, public_channel_lookup.get(str(doc.get("channel_id"))))
+        for doc in video_docs
+    ]
     return {"videos": videos, "count": len(videos)}
 
 
@@ -696,37 +711,24 @@ async def get_videos_with_risk(
     """Get videos filtered by risk criteria with flexible ID matching."""
     query = {}
     
-    # 1. Apply the ID resolution logic
     if channel_id:
-        if ObjectId.is_valid(channel_id):
-            # It's an internal Mongo ID
-            query["channel_id"] = ObjectId(channel_id)
-        else:
-            # It's a YouTube ID string, look up the internal ID
-            channel_doc = await db.channels.find_one({"channel_id": channel_id}, {"_id": 1})
-            if channel_doc:
-                query["channel_id"] = channel_doc["_id"]
-            else:
-                # If the channel isn't found
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Channel with ID {channel_id} not found."
-                )
+        query["channel_id"] = {"$in": await _resolve_channel_refs(channel_id)}
     
-    # 2. Risk Score Filter
     if min_risk_score is not None:
         query["risk_score"] = {"$gte": min_risk_score}
 
-    # 3. Fetch with Sorting
     cursor = db.videos.find(query).sort("risk_score", -1).limit(limit)
     
+    video_docs = await cursor.to_list(length=limit)
+    public_channel_lookup = await _build_public_channel_lookup()
+
     videos = []
-    async for doc in cursor:
+    for doc in video_docs:
         videos.append({
             "id": str(doc.get("_id")), # The internal video ID
             "video_id": doc.get("youtube_video_id"),
             "title": doc.get("title"),
-            "channel_id": str(doc.get("channel_id")), # Always return as string for the frontend
+            "channel_id": public_channel_lookup.get(str(doc.get("channel_id")), str(doc.get("channel_id"))),
             "channel_name": doc.get("channel_name"),
             "risk_score": doc.get("risk_score"),
             "risk_level": doc.get("risk_level"),
@@ -977,68 +979,73 @@ async def get_dashboard_claims(
 
 @router.get("/channels")
 async def get_channels():
-    """Get list of channels with aggregated stats."""
-    # Aggregate by channel
+    """Get list of channels with aggregated stats.
+
+    Handles both current ObjectId-linked videos and legacy YouTube-ID-linked videos.
+    """
     pipeline = [
         {
-            "$group": {
-                "_id": "$channel_id",
-                "channel_name": {"$first": "$channel_name"},
-                "video_count": {"$sum": 1},
-                "total_views": {"$sum": "$view_count"},
-                "total_likes": {"$sum": "$like_count"},
-                "total_comments": {"$sum": "$comment_count"},
+            "$lookup": {
+                "from": "videos",
+                "let": {"channel_oid": "$_id", "youtube_channel_id": "$channel_id"},
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$or": [
+                                    {"$eq": ["$channel_id", "$$channel_oid"]},
+                                    {"$eq": ["$channel_id", "$$youtube_channel_id"]}
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "video_count": {"$sum": 1},
+                            "total_views": {"$sum": {"$ifNull": ["$view_count", 0]}},
+                            "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
+                            "total_comments": {"$sum": {"$ifNull": ["$comment_count", 0]}}
+                        }
+                    }
+                ],
+                "as": "video_stats"
             }
         },
         {
-            "$lookup": {
-                "from": "channels",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "metadata"
+            "$addFields": {
+                "video_stats": {
+                    "$ifNull": [
+                        {"$arrayElemAt": ["$video_stats", 0]},
+                        {"video_count": 0, "total_views": 0, "total_likes": 0, "total_comments": 0}
+                    ]
+                }
             }
         },
-        {"$unwind": "$metadata"},
+        {"$match": {"video_stats.video_count": {"$gt": 0}}},
         {
             "$project": {
-                "channel_id": "$_id",
-                "channel_name": "$metadata.channel_name",
-                "handle": "$metadata.handle",
-                "sub_count": "$metadata.sub_count",
-                "league": "$metadata.league",
-                "video_count": 1,
-                "total_views": 1,
-                "total_likes": 1,
-                "total_comments": 1,
-                "sentiment_pct": "$metadata.sentiment_pct",
-                "sentiment_dir": "$metadata.sentiment_dir",
-                "risk_score": "$metadata.risk_score",
-                "risk_level": "$metadata.risk_level",
-                "risk_breakdown": "$metadata.risk_breakdown"
+                "id": {"$toString": "$_id"},
+                "channel_id": "$channel_id",
+                "channel_name": "$channel_name",
+                "handle": "$handle",
+                "sub_count": "$sub_count",
+                "league": "$league",
+                "video_count": "$video_stats.video_count",
+                "total_views": "$video_stats.total_views",
+                "total_likes": "$video_stats.total_likes",
+                "total_comments": "$video_stats.total_comments",
+                "sentiment_pct": "$sentiment_pct",
+                "sentiment_dir": "$sentiment_dir",
+                "risk_score": "$risk_score",
+                "risk_level": "$risk_level",
+                "risk_breakdown": "$risk_breakdown"
             }
         },
         {"$sort": {"video_count": -1}},
     ]
 
-    channels = []
-    async for doc in db.videos.aggregate(pipeline):
-        channels.append({
-            "channel_id": str(doc.get("_id")),
-            "channel_name": doc.get("channel_name"),
-            "handle": doc.get("handle"),
-            "sub_count": doc.get("sub_count"),
-            "league": doc.get("league"),
-            "video_count": doc["video_count"],
-            "total_views": doc["total_views"],
-            "total_likes": doc["total_likes"],
-            "total_comments": doc["total_comments"],
-            "sentiment_pct": doc.get("sentiment_pct"),
-            "sentiment_dir": doc.get("sentiment_dir"),
-            "risk_score": doc.get("risk_score"),
-            "risk_level": doc.get("risk_level"),
-            "risk_breakdown": doc.get("risk_breakdown")
-        })
-
+    channels = await db.channels.aggregate(pipeline).to_list(length=None)
     return {"channels": channels, "count": len(channels)}
 
 
@@ -1148,16 +1155,8 @@ async def get_trends_history():
 @router.get("/channels/{channel_id}/latest-video")
 async def get_channel_latest_video(channel_id: str):
     """Get the latest video for a specific channel by MongoDB ObjectId or YouTube channel ID."""
-    if ObjectId.is_valid(channel_id):
-        channel_oid = ObjectId(channel_id)
-    else:
-        channel_doc = await db.channels.find_one({"channel_id": channel_id}, {"_id": 1})
-        if not channel_doc:
-            raise HTTPException(status_code=404, detail=f"Channel with ID {channel_id} not found")
-        channel_oid = channel_doc["_id"]
-
     latest_video = await db.videos.find_one(
-        {"channel_id": channel_oid},
+        {"channel_id": {"$in": await _resolve_channel_refs(channel_id)}},
         sort=[("publish_date", -1)],
     )
 
@@ -1204,10 +1203,54 @@ async def get_channels_with_risk(
     max_risk_score: Optional[float] = None,
     limit: int = Query(default=100, ge=1, le=500),
 ):
-    """Get channels with both Internal ID and YouTube Channel ID."""
+    """Get channel risk summaries.
+
+    Handles both current ObjectId-linked videos and legacy YouTube-ID-linked videos.
+    """
     pipeline = [
-        # 1. Group videos by their internal channel_id (the ObjectId)
         {
+            "$lookup": {
+                "from": "videos",
+                "let": {"channel_oid": "$_id", "youtube_channel_id": "$channel_id"},
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$or": [
+                                    {"$eq": ["$channel_id", "$$channel_oid"]},
+                                    {"$eq": ["$channel_id", "$$youtube_channel_id"]}
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "video_count": {"$sum": 1},
+                            "total_views": {"$sum": {"$ifNull": ["$view_count", 0]}},
+                            "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
+                            "total_comments": {"$sum": {"$ifNull": ["$comment_count", 0]}},
+                            "avg_score": {"$avg": "$risk_score"},
+                            "videos_with_risk": {
+                                "$sum": {
+                                    "$cond": [
+                                        {"$ne": ["$risk_score", None]},
+                                        1,
+                                        0
+                                    ]
+                                }
+                            },
+                            "avg_self_harm": {"$avg": "$risk_breakdown.self_harm"},
+                            "avg_violence": {"$avg": "$risk_breakdown.violence"},
+                            "avg_illegal_activities": {"$avg": "$risk_breakdown.illegal_activities"},
+                            "avg_misinformation": {"$avg": "$risk_breakdown.misinformation"},
+                            "avg_hate_speech": {"$avg": "$risk_breakdown.hate_speech"},
+                            "avg_harassment": {"$avg": "$risk_breakdown.harassment"},
+                            "avg_toxicity": {"$avg": "$risk_breakdown.toxicity"}
+                        }
+                    }
+                ],
+                "as": "risk_stats"
             "$group": {
                 "_id": "$channel_id",
                 "channel_name": {"$first": {"$ifNull": ["$channel_name", "Unknown Channel"]}},
@@ -1234,20 +1277,36 @@ async def get_channels_with_risk(
                 "avg_toxicity": {"$avg": "$risk_breakdown.toxicity"}
             }
         },
-        # 2. Join with the 'channels' collection to get the YouTube ID string
-        {
-            "$lookup": {
-                "from": "channels",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "channel_info"
-            }
-        },
-        # 3. Flatten the join result
-        {"$unwind": "$channel_info"},
-        # 4. Calculate Risk Level
         {
             "$addFields": {
+                "risk_stats": {
+                    "$ifNull": [
+                        {"$arrayElemAt": ["$risk_stats", 0]},
+                        {
+                            "video_count": 0,
+                            "total_views": 0,
+                            "total_likes": 0,
+                            "total_comments": 0,
+                            "avg_score": None,
+                            "videos_with_risk": 0,
+                            "avg_self_harm": None,
+                            "avg_violence": None,
+                            "avg_illegal_activities": None,
+                            "avg_misinformation": None,
+                            "avg_hate_speech": None,
+                            "avg_harassment": None,
+                            "avg_toxicity": None
+                        }
+                    ]
+                }
+            }
+        },
+        {"$match": {"risk_stats.video_count": {"$gt": 0}}},
+        {
+            "$addFields": {
+                "computed_risk_level": {
+                    "$cond": [
+                        {"$eq": ["$risk_stats.videos_with_risk", 0]},
                 "risk_level": {
                     "$cond": [
                         {"$eq": ["$videos_with_risk", 0]},
@@ -1255,6 +1314,9 @@ async def get_channels_with_risk(
                         {
                             "$switch": {
                                 "branches": [
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 76]}, "then": "critical"},
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 51]}, "then": "high"},
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 26]}, "then": "medium"}
                                     {"case": {"$gte": ["$avg_score", 76]}, "then": "critical"},
                                     {"case": {"$gte": ["$avg_score", 51]}, "then": "high"},
                                     {"case": {"$gte": ["$avg_score", 26]}, "then": "medium"}
@@ -1268,24 +1330,78 @@ async def get_channels_with_risk(
         }
     ]
 
-    # Apply Post-Grouping Filters
     post_match = {}
     if risk_level:
-        post_match["risk_level"] = risk_level.lower()
+        post_match["computed_risk_level"] = risk_level.lower()
     if min_risk_score is not None or max_risk_score is not None:
-        post_match["avg_score"] = {}
+        post_match["risk_stats.avg_score"] = {}
         if min_risk_score is not None:
-            post_match["avg_score"]["$gte"] = min_risk_score
+            post_match["risk_stats.avg_score"]["$gte"] = min_risk_score
         if max_risk_score is not None:
-            post_match["avg_score"]["$lte"] = max_risk_score
-
+            post_match["risk_stats.avg_score"]["$lte"] = max_risk_score
     if post_match:
         pipeline.append({"$match": post_match})
 
-    pipeline.extend([{"$sort": {"avg_score": -1}}, {"$limit": limit}])
+    pipeline.extend([
+        {
+            "$project": {
+                "id": {"$toString": "$_id"},
+                "channel_id": "$channel_id",
+                "channel_name": "$channel_name",
+                "video_count": "$risk_stats.video_count",
+                "total_views": "$risk_stats.total_views",
+                "total_likes": "$risk_stats.total_likes",
+                "total_comments": "$risk_stats.total_comments",
+                "videos_with_risk": "$risk_stats.videos_with_risk",
+                "risk_score": "$risk_stats.avg_score",
+                "risk_level": "$computed_risk_level",
+                "risk_breakdown": {
+                    "self_harm": "$risk_stats.avg_self_harm",
+                    "violence": "$risk_stats.avg_violence",
+                    "illegal_activities": "$risk_stats.avg_illegal_activities",
+                    "misinformation": "$risk_stats.avg_misinformation",
+                    "hate_speech": "$risk_stats.avg_hate_speech",
+                    "harassment": "$risk_stats.avg_harassment",
+                    "toxicity": "$risk_stats.avg_toxicity"
+                }
+            }
+        },
+        {"$sort": {"risk_score": -1}},
+        {"$limit": limit}
+    ])
 
     try:
+        raw_channels = await db.channels.aggregate(pipeline).to_list(length=None)
+
+        def safe_round(val):
+            return round(val, 2) if val is not None else None
+
         channels = []
+        for doc in raw_channels:
+            videos_with_risk = doc.get("videos_with_risk", 0)
+            breakdown = doc.get("risk_breakdown") or {}
+            risk_breakdown = None
+            if videos_with_risk > 0:
+                risk_breakdown = {
+                    "self_harm": safe_round(breakdown.get("self_harm")),
+                    "violence": safe_round(breakdown.get("violence")),
+                    "illegal_activities": safe_round(breakdown.get("illegal_activities")),
+                    "misinformation": safe_round(breakdown.get("misinformation")),
+                    "hate_speech": safe_round(breakdown.get("hate_speech")),
+                    "harassment": safe_round(breakdown.get("harassment")),
+                    "toxicity": safe_round(breakdown.get("toxicity")),
+                }
+
+            channels.append({
+                "id": doc.get("id"),
+                "channel_id": doc.get("channel_id"),
+                "channel_name": doc.get("channel_name"),
+                "video_count": doc.get("video_count", 0),
+                "total_views": doc.get("total_views", 0),
+                "total_likes": doc.get("total_likes", 0),
+                "total_comments": doc.get("total_comments", 0),
+                "videos_with_risk": videos_with_risk,
+                "risk_score": safe_round(doc.get("risk_score")) if videos_with_risk > 0 else None,
         async for doc in db.videos.aggregate(pipeline):
             def safe_round(val):
                 return round(val, 2) if val is not None else None
@@ -1328,25 +1444,9 @@ async def get_channels_with_risk(
 async def get_channel_risk(channel_id: str):
     """Get detailed risk profile using either Internal ObjectId or YouTube ID."""
     
-    query = {}
+    resolved_refs = await _resolve_channel_refs(channel_id)
+    query = {"channel_id": {"$in": resolved_refs}}
 
-    # 1. Resolve the ID type
-    if ObjectId.is_valid(channel_id):
-        # Case A: It's an internal Mongo ID (Fastest)
-        query["channel_id"] = ObjectId(channel_id)
-    else:
-        # Case B: It's a YouTube ID (e.g., UC...) - Look up the internal reference
-        channel_doc = await db.channels.find_one({"channel_id": channel_id}, {"_id": 1})
-        if channel_doc:
-            query["channel_id"] = channel_doc["_id"]
-        else:
-            # Case C: Not a valid Mongo ID and not found as a YouTube ID
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Channel with ID {channel_id} not found."
-            )
-
-    # 2. Build the Pipeline using the resolved internal ID
     pipeline = [
         {
             "$match": query
@@ -1400,7 +1500,7 @@ async def get_channel_risk(channel_id: str):
     channel_data = results[0]
 
     # 4. Fetch the YouTube ID string for the final response consistency
-    channel_info = await db.channels.find_one({"_id": query["channel_id"]}, {"channel_id": 1})
+    channel_info = await db.channels.find_one({"$or": [{"_id": resolved_refs[0]}, {"channel_id": resolved_refs[-1]}]}, {"channel_id": 1})
     yt_channel_id = channel_info.get("channel_id") if channel_info else "Unknown"
 
     def safe_round(val):

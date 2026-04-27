@@ -468,6 +468,23 @@ async def get_unprocessed_vids(source_collection, source_type):
     cursor = db[source_collection].aggregate(pipeline)
     return [doc["_id"] for doc in await cursor.to_list(length=None)]
 
+async def _resolve_channel_doc_for_aggregate(channel_ref):
+    """Resolve a grouped video channel reference to the canonical channel document.
+
+    Supports both current ObjectId-linked videos and legacy YouTube-ID-linked videos.
+    """
+    if isinstance(channel_ref, ObjectId):
+        return await db.channels.find_one({"_id": channel_ref}, {"sentiment_pct": 1, "channel_id": 1})
+
+    channel_ref_str = str(channel_ref)
+    if ObjectId.is_valid(channel_ref_str):
+        channel_doc = await db.channels.find_one({"_id": ObjectId(channel_ref_str)}, {"sentiment_pct": 1, "channel_id": 1})
+        if channel_doc:
+            return channel_doc
+
+    return await db.channels.find_one({"channel_id": channel_ref_str}, {"sentiment_pct": 1, "channel_id": 1})
+
+
 async def update_global_aggregates():
     """Combined aggregation logic for Risk and Sentiment across Videos and Channels with Directional Tracking."""
     print("Updating Global Aggregates (Risk & Sentiment)...")
@@ -501,39 +518,34 @@ async def update_global_aggregates():
     ]
     channel_stats = await db.videos.aggregate(channel_pipeline).to_list(length=None)
     for stat in channel_stats:
-        channel_id = stat["_id"]
+        channel_ref = stat["_id"]
         new_avg_sentiment = round(stat["avg_sentiment"], 4)
         risk = stat["avg_risk"] or 0.0
 
-        # Risk Level Logic
         risk_level = "low"
-        if risk >= 76: risk_level = "critical"
-        elif risk >= 51: risk_level = "high"
-        elif risk >= 26: risk_level = "medium"
+        if risk >= 76:
+            risk_level = "critical"
+        elif risk >= 51:
+            risk_level = "high"
+        elif risk >= 26:
+            risk_level = "medium"
 
-        # look up channel by _id (ObjectId) since ingest_videos stores the ObjectId
-        # on videos.channel_id
-        #c_oid = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
-        
-        # if youtube_id it wil skip safely and prevents any crash 
-        from bson.errors import InvalidId
+        existing_channel = await _resolve_channel_doc_for_aggregate(channel_ref)
+        if not existing_channel:
+            print(f"[SKIP] Could not resolve channel aggregate target: {channel_ref}")
+            continue
 
-        try:
-           c_oid = channel_id if isinstance(channel_id, ObjectId) else ObjectId(channel_id)
-        except InvalidId:
-           print(f"[SKIP] Invalid channel_id: {channel_id}")
-           continue
-        existing_channel = await db.channels.find_one({"_id": c_oid}, {"sentiment_pct": 1})
-        old_pct = existing_channel.get("sentiment_pct") if existing_channel else None
+        old_pct = existing_channel.get("sentiment_pct")
 
-        # Sentiment Direction Logic
         sentiment_dir = "stable"
         if old_pct is not None:
-            if new_avg_sentiment > old_pct: sentiment_dir = "up"
-            elif new_avg_sentiment < old_pct: sentiment_dir = "down"
+            if new_avg_sentiment > old_pct:
+                sentiment_dir = "up"
+            elif new_avg_sentiment < old_pct:
+                sentiment_dir = "down"
 
         await db.channels.update_one(
-            {"_id": c_oid},
+            {"_id": existing_channel["_id"]},
             {"$set": {
                 "risk_score": round(risk, 2),
                 "risk_level": risk_level,
@@ -542,7 +554,10 @@ async def update_global_aggregates():
                 "updated_at": datetime.now(timezone.utc)
             }}
         )
-        print(f"  [Channel] Updated {channel_id}: risk={round(risk, 2)} ({risk_level}), sentiment={new_avg_sentiment} ({sentiment_dir})")
+        print(
+            f"  [Channel] Updated {existing_channel.get('channel_id', channel_ref)}: "
+            f"risk={round(risk, 2)} ({risk_level}), sentiment={new_avg_sentiment} ({sentiment_dir})"
+        )
 
 async def run_pipeline(api_base_url="http://localhost:8000"):
     global total_videos
