@@ -1176,6 +1176,15 @@ async def get_channels_with_risk(
                             "total_likes": {"$sum": {"$ifNull": ["$like_count", 0]}},
                             "total_comments": {"$sum": {"$ifNull": ["$comment_count", 0]}},
                             "avg_score": {"$avg": "$risk_score"},
+                            "videos_with_risk": {
+                                "$sum": {
+                                    "$cond": [
+                                        {"$ne": ["$risk_score", None]},
+                                        1,
+                                        0
+                                    ]
+                                }
+                            },
                             "avg_self_harm": {"$avg": "$risk_breakdown.self_harm"},
                             "avg_violence": {"$avg": "$risk_breakdown.violence"},
                             "avg_illegal_activities": {"$avg": "$risk_breakdown.illegal_activities"},
@@ -1200,6 +1209,7 @@ async def get_channels_with_risk(
                             "total_likes": 0,
                             "total_comments": 0,
                             "avg_score": None,
+                            "videos_with_risk": 0,
                             "avg_self_harm": None,
                             "avg_violence": None,
                             "avg_illegal_activities": None,
@@ -1216,14 +1226,20 @@ async def get_channels_with_risk(
         {
             "$addFields": {
                 "computed_risk_level": {
-                    "$switch": {
-                        "branches": [
-                            {"case": {"$gte": ["$risk_stats.avg_score", 76]}, "then": "critical"},
-                            {"case": {"$gte": ["$risk_stats.avg_score", 51]}, "then": "high"},
-                            {"case": {"$gte": ["$risk_stats.avg_score", 26]}, "then": "medium"}
-                        ],
-                        "default": "low"
-                    }
+                    "$cond": [
+                        {"$eq": ["$risk_stats.videos_with_risk", 0]},
+                        None,
+                        {
+                            "$switch": {
+                                "branches": [
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 76]}, "then": "critical"},
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 51]}, "then": "high"},
+                                    {"case": {"$gte": ["$risk_stats.avg_score", 26]}, "then": "medium"}
+                                ],
+                                "default": "low"
+                            }
+                        }
+                    ]
                 }
             }
         }
@@ -1251,6 +1267,7 @@ async def get_channels_with_risk(
                 "total_views": "$risk_stats.total_views",
                 "total_likes": "$risk_stats.total_likes",
                 "total_comments": "$risk_stats.total_comments",
+                "videos_with_risk": "$risk_stats.videos_with_risk",
                 "risk_score": "$risk_stats.avg_score",
                 "risk_level": "$computed_risk_level",
                 "risk_breakdown": {
@@ -1272,22 +1289,15 @@ async def get_channels_with_risk(
         raw_channels = await db.channels.aggregate(pipeline).to_list(length=None)
 
         def safe_round(val):
-            return round(val, 2) if val is not None else 0
+            return round(val, 2) if val is not None else None
 
         channels = []
         for doc in raw_channels:
+            videos_with_risk = doc.get("videos_with_risk", 0)
             breakdown = doc.get("risk_breakdown") or {}
-            channels.append({
-                "id": doc.get("id"),
-                "channel_id": doc.get("channel_id"),
-                "channel_name": doc.get("channel_name"),
-                "video_count": doc.get("video_count", 0),
-                "total_views": doc.get("total_views", 0),
-                "total_likes": doc.get("total_likes", 0),
-                "total_comments": doc.get("total_comments", 0),
-                "risk_score": safe_round(doc.get("risk_score")),
-                "risk_level": doc.get("risk_level"),
-                "risk_breakdown": {
+            risk_breakdown = None
+            if videos_with_risk > 0:
+                risk_breakdown = {
                     "self_harm": safe_round(breakdown.get("self_harm")),
                     "violence": safe_round(breakdown.get("violence")),
                     "illegal_activities": safe_round(breakdown.get("illegal_activities")),
@@ -1296,6 +1306,19 @@ async def get_channels_with_risk(
                     "harassment": safe_round(breakdown.get("harassment")),
                     "toxicity": safe_round(breakdown.get("toxicity")),
                 }
+
+            channels.append({
+                "id": doc.get("id"),
+                "channel_id": doc.get("channel_id"),
+                "channel_name": doc.get("channel_name"),
+                "video_count": doc.get("video_count", 0),
+                "total_views": doc.get("total_views", 0),
+                "total_likes": doc.get("total_likes", 0),
+                "total_comments": doc.get("total_comments", 0),
+                "videos_with_risk": videos_with_risk,
+                "risk_score": safe_round(doc.get("risk_score")) if videos_with_risk > 0 else None,
+                "risk_level": doc.get("risk_level") if videos_with_risk > 0 else None,
+                "risk_breakdown": risk_breakdown,
             })
 
         return {"channels": channels, "count": len(channels)}
@@ -1330,20 +1353,26 @@ async def get_channel_risk(channel_id: str):
                 "avg_hate_speech": {"$avg": "$risk_breakdown.hate_speech"},
                 "avg_harassment": {"$avg": "$risk_breakdown.harassment"},
                 "avg_toxicity": {"$avg": "$risk_breakdown.toxicity"},
-                "videos_with_risk": {"$sum": {"$cond": [{"$gt": ["$risk_score", 0]}, 1, 0]}},
+                "videos_with_risk": {"$sum": {"$cond": [{"$ne": ["$risk_score", None]}, 1, 0]}},
             }
         },
         {
             "$addFields": {
                 "risk_level": {
-                    "$switch": {
-                        "branches": [
-                            {"case": {"$gte": ["$avg_risk_score", 76]}, "then": "critical"},
-                            {"case": {"$gte": ["$avg_risk_score", 51]}, "then": "high"},
-                            {"case": {"$gte": ["$avg_risk_score", 26]}, "then": "medium"}
-                        ],
-                        "default": "low"
-                    }
+                    "$cond": [
+                        {"$eq": ["$videos_with_risk", 0]},
+                        None,
+                        {
+                            "$switch": {
+                                "branches": [
+                                    {"case": {"$gte": ["$avg_risk_score", 76]}, "then": "critical"},
+                                    {"case": {"$gte": ["$avg_risk_score", 51]}, "then": "high"},
+                                    {"case": {"$gte": ["$avg_risk_score", 26]}, "then": "medium"}
+                                ],
+                                "default": "low"
+                            }
+                        }
+                    ]
                 }
             }
         }
@@ -1363,17 +1392,12 @@ async def get_channel_risk(channel_id: str):
     yt_channel_id = channel_info.get("channel_id") if channel_info else "Unknown"
 
     def safe_round(val):
-        return round(val, 2) if val is not None else 0
+        return round(val, 2) if val is not None else None
 
-    return {
-        "id": str(channel_data["_id"]),
-        "channel_id": yt_channel_id,
-        "channel_name": channel_data["channel_name"],
-        "video_count": channel_data["video_count"],
-        "videos_with_risk": channel_data["videos_with_risk"],
-        "avg_risk_score": safe_round(channel_data["avg_risk_score"]),
-        "risk_level": channel_data["risk_level"],
-        "risk_breakdown": {
+    videos_with_risk = channel_data.get("videos_with_risk", 0)
+    risk_breakdown = None
+    if videos_with_risk > 0:
+        risk_breakdown = {
             "self_harm": safe_round(channel_data.get("avg_self_harm")),
             "violence": safe_round(channel_data.get("avg_violence")),
             "illegal_activities": safe_round(channel_data.get("avg_illegal_activities")),
@@ -1382,4 +1406,14 @@ async def get_channel_risk(channel_id: str):
             "harassment": safe_round(channel_data.get("avg_harassment")),
             "toxicity": safe_round(channel_data.get("avg_toxicity")),
         }
+
+    return {
+        "id": str(channel_data["_id"]),
+        "channel_id": yt_channel_id,
+        "channel_name": channel_data["channel_name"],
+        "video_count": channel_data["video_count"],
+        "videos_with_risk": videos_with_risk,
+        "avg_risk_score": safe_round(channel_data["avg_risk_score"]) if videos_with_risk > 0 else None,
+        "risk_level": channel_data["risk_level"] if videos_with_risk > 0 else None,
+        "risk_breakdown": risk_breakdown,
     }
