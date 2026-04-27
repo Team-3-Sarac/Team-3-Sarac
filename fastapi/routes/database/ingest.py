@@ -25,6 +25,19 @@ def strip_none(doc: dict) -> dict:
     """Remove None values from dict before DB insertion."""
     return {k: v for k, v in doc.items() if v is not None}
 
+
+def _json_safe(value):
+    """Recursively convert Mongo/Python values into JSON-safe primitives."""
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
 async def _build_video_id_lookup() -> dict[str, object]:
     """Map youtube_video_id -> MongoDB ObjectId for relational linking."""
     cursor = db.videos.find({}, {"youtube_video_id": 1})
@@ -1064,7 +1077,8 @@ async def get_channels():
         {"$sort": {"video_count": -1}},
     ]
 
-    channels = await db.channels.aggregate(pipeline).to_list(length=None)
+    raw_channels = await db.channels.aggregate(pipeline).to_list(length=None)
+    channels = [_json_safe(channel) for channel in raw_channels]
     return {"channels": channels, "count": len(channels)}
 
 
