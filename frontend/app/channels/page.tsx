@@ -96,10 +96,13 @@ function formatViews(views: number): string {
 
 function getMostCommonLeague(videos: any[]): string {
   if (!videos.length) return "Multi-League";
+
   const counts: Record<string, number> = {};
   for (const v of videos) {
-    if (v.league) counts[v.league] = (counts[v.league] || 0) + 1;
+    const league = Array.isArray(v.league) ? v.league[0] : v.league;
+    if (league) counts[league] = (counts[league] || 0) + 1;
   }
+
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   return sorted[0]?.[0] || "Multi-League";
 }

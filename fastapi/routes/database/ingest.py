@@ -597,20 +597,39 @@ async def ingest_channel_stats(stats: list[ChannelStats]):
 
 
 def _doc_to_video_out(doc: dict, public_channel_id: str | None = None) -> VideoOut:
-    """Convert MongoDB video document to VideoOut schema."""
+    """Convert MongoDB video document to VideoOut schema.
+
+    Be tolerant of older/incomplete documents so one bad record doesn't 500 the whole page.
+    """
     league_raw = doc.get("league")
     if isinstance(league_raw, list):
         league = league_raw[0] if league_raw else None
     else:
         league = league_raw
+
+    publish_date = doc.get("publish_date")
+    created_at = doc.get("created_at")
+
+    if isinstance(publish_date, datetime):
+        publish_date = publish_date.isoformat()
+    elif publish_date is None:
+        publish_date = ""
+
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
+    elif created_at is None:
+        created_at = publish_date
+
+    raw_channel_id = doc.get("channel_id")
+
     return VideoOut(
-        id=str(doc["_id"]),
-        video_id=doc["youtube_video_id"],
-        title=doc["title"],
+        id=str(doc.get("_id")) if doc.get("_id") is not None else None,
+        video_id=doc.get("youtube_video_id") or str(doc.get("_id") or ""),
+        title=doc.get("title") or "Untitled Video",
         thumbnail_url=doc.get("thumbnail_url"),
-        channel_id=public_channel_id or str(doc["channel_id"]),
-        channel_name=doc.get("channel_name", ""),
-        publish_date=doc["publish_date"].isoformat() if isinstance(doc["publish_date"], datetime) else doc["publish_date"],
+        channel_id=public_channel_id or (str(raw_channel_id) if raw_channel_id is not None else ""),
+        channel_name=doc.get("channel_name") or "Unknown Channel",
+        publish_date=publish_date,
         league=league,
         teams=doc.get("teams"),
         view_count=doc.get("view_count", 0),
@@ -619,10 +638,10 @@ def _doc_to_video_out(doc: dict, public_channel_id: str | None = None) -> VideoO
         duration_seconds=doc.get("duration_seconds", 0),
         summary=doc.get("summary"),
         sentiment_pct=doc.get("sentiment_pct"),
-        risk_score=doc.get("risk_score", 0),
-        risk_level=doc.get("risk_level", "low"),
+        risk_score=doc.get("risk_score"),
+        risk_level=doc.get("risk_level"),
         risk_breakdown=doc.get("risk_breakdown"),
-        created_at=doc["created_at"].isoformat() if isinstance(doc["created_at"], datetime) else doc["created_at"],
+        created_at=created_at,
     )
 
 
